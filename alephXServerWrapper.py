@@ -6,9 +6,10 @@ import urllib
 import urllib2
 import libxml2
 import time
-import os
+import os, sys
 import sqlite3
 
+failed = []
 
 class XServer():
 
@@ -34,18 +35,18 @@ class Record():
     return output
     
   def getMarc(self, field, subfield):
-    """Vrátí pole výsledků pro hledané pole ('field') a podpole ('subfield')""" 
-  
+    """Vrátí pole výsledků pro hledané pole ('field') a podpole ('subfield')"""
+ 
     xpath = "//varfield[@id='%s']/subfield[@label='%s']" % (str(field), str(subfield))
     return self.getXPath(xpath)
 
 
 class Base():
-  
+ 
   def __init__(self, xServer, baseID):
     self.xServer = xServer
     self.ID = baseID
-  
+ 
   def getParsedRecord(self, docNum):
     """Získá záznam dokumentu v bázi 'base' se systémovým číslem 'docNum'"""
     
@@ -70,7 +71,7 @@ class Base():
       return True
     else:
       return False
-  
+ 
   def getRecordCount(self):
     """Zjistí počet záznamů v databázi."""
     
@@ -106,46 +107,57 @@ class Base():
     
     return mid
 
-  
+ 
 class Crawler():
 
   def __init__(self, base):
     self.status = False
     self.base = base
-  
+    """Sleep time for none-KeyboardInterrupt exception"""
+    self.sleep = 5
+    """Testing variable"""
+    self.test = 0
+ 
   def crawl(self, callback, sleep = 0.05):
     """Postupně projde všechny záznamy v databázi a pro každý zavolá 'callback'"""
-    
-    if not self.status:
-      self.status = 1
+    if self.status == False:
+      try:
+        resume = file("crawlerStatus.txt", "r")
+        self.status = int(resume.read())
+        resume.close()
+      except:  
+        self.status = 1
       
     begin = int(self.status)
     baseLen = self.base.getRecordCount()
     baseRange = range(begin, baseLen + 1)
-
-    for i in baseRange:
-      time.sleep(sleep) # Slušný crawler čeká sekundu mezi požadavky!
-      self.status = str(i)
-      self.saveStatus()
-      callback(self.base.getParsedRecord(i))
-    
-  def resume(self):
-    """Získá číslo záznamu, který byl naposledy zpracováván"""
     try:
-      file = open("crawlerStatus.txt", "r")
-      self.status = file.read()
-    except IOError:
-      pass
-   
-  def saveStatus(self):
+      for i in baseRange:
+        time.sleep(sleep) # Slušný crawler čeká sekundu mezi požadavky!
+        self.status = str(i)
+        callback(self.base.getParsedRecord(i), i)
+    except KeyboardInterrupt:
+        self.saveStatus(i, True)        
+    except:
+        if self.test != i:
+          self.saveStatus(i)
+        time.sleep(self.sleep)
+        self.sleep = self.sleep*5
+        self.test = i
+        self.crawl(callback)
+        
+    
+  def saveStatus(self, i, keyboardInterrupt = False):
     """Uloží číslo aktuálně zpracovávaného záznamu"""
-    file = open("crawlerStatus.txt", "w")
-    file.write(self.status)
-    file.close() 
+    last = file("crawlerStatus.txt", "w")
+    last.write(str(i))
+    last.close()
+    if keyboardInterrupt == True:
+      sys.exit(0)
     
     
 class MarcARecord(Record):
-  
+ 
   def __init__(self, record):
     Record.__init__(self, record.doc)
     
@@ -190,9 +202,9 @@ class MarcARecord(Record):
     """Vrátí preferovaná znění nadřazených hesel v češtině"""
     return self.getXPath("//varfield[@id='550'][subfield[@label='w']='g']/subfield[@label='a']")
     
-  
+ 
 class PSHDB():
-  
+ 
   def __init__(self, purge=False):
     self.connection = False
     self.cursor = False
@@ -201,11 +213,11 @@ class PSHDB():
       os.remove("psh.db")
     
     self.createDB()
-  
+ 
   def clearRelations(self):
     print "INFO: čistění vztahů"""
     self.query("""DELETE FROM hierarchie;""")
-    self.query("""DELETE FROM pribuznost;""") 
+    self.query("""DELETE FROM pribuznost;""")
     
   def createDB(self):
     """Vytvoří databázi"""
@@ -235,7 +247,7 @@ class PSHDB():
     """Provede v databázi dotaz"""
     self.cursor.execute(query)
     self.connection.commit()
-  
+ 
   def dump(self):
     """Exportuje databázi v textovém SQL formátu"""
     with open('dump.sql', 'w') as f:
@@ -259,7 +271,7 @@ class PSHDB():
     """Uzavře databázi"""
     self.cursor.close()
     self.connection.close()
-  
+ 
   def extractLabels(self, record):
     """Ze záznamu získá preferovaná a nepreferovaná záhlaví"""
     record = MarcARecord(record)
