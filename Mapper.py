@@ -233,8 +233,7 @@ class DBPediaMapper(Mapper):
     Mapper.__init__(self, doc)
     
   def mapData(self):
-    # Extrahovat preferované znění v angličtině
-    # Nepreferované znění v angličtině?
+    # Extract English preferred and non-preferred headings
     prefLabel = self.doc.getPrefLabelEN()
     altLabels = self.doc.getNonprefLabelsEN()
     baseurl = "http://lookup.dbpedia.org/api/search.asmx/KeywordSearch?QueryClass=&MaxHits=1&QueryString="
@@ -242,13 +241,38 @@ class DBPediaMapper(Mapper):
     results = []
     # Mapování preferovaného znění hesla
     url = baseurl + urllib.quote(prefLabel)
-    result = urllib2.urlopen(url)
-    doc = result.read()
-    result.close()
+    doc = self.getParsedDoc(url)
+    match = self.checkMatch(prefLabel, doc)
+    if match:
+      results.append(("skos:exactMatch", match))
     
     # Mapování nepreferovaného znění hesla
     for altLabel in altLabels:
       url = baseurl + urllib.quote(altLabel)
+      doc = self.getParsedDoc(url)
+      match = self.checkMatch(altLabel, doc)
+      if match:
+        results.append(("skos:closeMatch", match))
+    
+    return results
+    
+  def getParsedDoc(self, url):
+    result = urllib2.urlopen(url)
+    doc = result.read()
+    result.close()
+    
+    doc = libxml2.parseDoc(doc)
+    return doc
+    
+  def checkMatch(self, label, doc):
+    # This style of XPath queries must be used because 
+    # the default XML namespace is specified.
+    labels = doc.xpathEval("//*[name()='Label']")
+    if label == labels[0].content.lower():
+      uris = doc.xpathEval("//*[name()='URI']")
+      return uris[0]
+    else:
+      return False
 
 class LCSHMapper(Mapper):
 
