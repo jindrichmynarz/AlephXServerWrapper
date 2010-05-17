@@ -470,7 +470,7 @@ class ISSNMapper(Mapper):
   """ISSN to system number translation. Returns the URI of the previous version."""
   
   def __init__(self, doc, linkType):
-    # linkType = {"previous" | "following" }
+    # linkType = {"previous" | "following" | "physical" }
     Mapper.__init__(self, doc)
     self.type = linkType
     
@@ -481,6 +481,9 @@ class ISSNMapper(Mapper):
     if linkType == "following":
       ISSN = self.doc.xpathEval("//varfield[@id='785']/subfield[@label='x']")
       predicate = "dbpedia:following"
+    if linkType == "physical":
+      ISSN = self.doc.xpathEval("//varfield[@id='776']/subfield[@label='x']")
+      predicate = "dcterms:hasVersion"
     else:
       raise ValueError("Incorrect ISSN link type.")
       
