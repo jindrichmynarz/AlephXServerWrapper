@@ -1,32 +1,30 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
-import urllib
-import urllib2
-import libxml2
-import re
-import time
-import string
+import urllib, urllib2, libxml2, re, time, string, rdflib
 from alephXServerWrapper import *
+import rdflibWrapper
 
 class Mapper():
   """Obecná třída pro mapování hodnot."""
   
-  def __init__(self, doc):
+  def __init__(self, doc, resourceURI, representationURI):
     """Na vstupu bere 1 argument - instanci třídy alephXServerWrapper.Record."""
     self.doc = doc # Na vstupu bere celý XML záznam (class Record)
+    self.resourceURI = resourceURI
+    self.representationURI = representationURI
     
   def mapData(self):
     """Vrací pole s tuples s predikáty a jejich objekty, subjektem je vždy zpracováváný dokument.
     Tuto metodu každá podtřída přepisuje."""
-    return [("predikát 1", "objekt 1"), ("predikát 2", "objekt 2")]
+    return [(self.resourceURI, "predikát 1", "objekt 1"), (self.representationURI, "predikát 2", "objekt 2")]
    
   def getParsedDoc(self, url):
     """Na zadané URL nebo urllib2.Request vrátí naparsovaný XML dokument.""" 
     result = urllib2.urlopen(url)
     doc = result.read()
     result.close()
-    doc = libxml2.parseDoc(doc)
+    doc = Record(libxml2.parseDoc(doc))
     return doc
      
   def validateURI(self, uri):
@@ -41,10 +39,10 @@ class Mapper():
     """Searches the Aleph X Services (running on baseUrl) with specified database code for the request, within the find code and returns the result."""
     url = "%s/X?op=find&base=%s&code=%s&request=%s" % (baseUrl, baseCode, findCode, urllib.quote(request.strip()))
     doc = self.getParsedDoc(url)
-    error = doc.xpathEval("find/error")
+    error = doc.getXPath("find/error")
     if error == []:
-      noRecords = doc.xpathEval("find/no_records")[0].content
-      setNumber = doc.xpathEval("find/set_number")[0].content
+      noRecords = doc.xpathEval("find/no_records")[0]
+      setNumber = doc.xpathEval("find/set_number")[0]
       url = "%sX?op=present&base=%s&set_entry=1-%s&set_number=%s" % (baseUrl, baseCode, noRecords.lstrip("0"), setNumber)
       doc = self.getParsedDoc(url)
       return doc
@@ -54,8 +52,8 @@ class Mapper():
 class DCMITypeMapper(Mapper):
   """Mapování typu dokumentu na DCMI Types, resp. typy z dalších ontologií (BIBO, YAGO)."""
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     returnValue = None
@@ -63,51 +61,83 @@ class DCMITypeMapper(Mapper):
     position7 = self.doc.getXPath("substring(//fixfield[@id='LDR'], 7, 1)")
     
     if position6 in ["a"]:
-      return [("dc:type", "dctypens:Text")]
+      return [(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["type"],
+        rdflibWrapper.namespaces["dctype"]["Text"]
+      )]
     if position6 in ["c"]:
-      return [("dc:type", "yago:SheetMusic")]
+      return [(
+        self.resourceURI,
+        rdflifWrapper.namespaces["dc"]["type"],
+        rdflibWrapper.namespaces["yago"]["SheetMusic"]
+      )]
     if position6 in ["d"]:
-      return [("dc:type", "yago:SheetMusic"), ("dc:type", "yago:Manuscript")]
+      return [(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["type"], 
+        rdflibWrapper.namespaces["yago"]["SheetMusic"]
+      ), (
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc:type"],
+        rdflibWrapper.namespaces["yago:Manuscript"]
+      )]
     if position6 in ["e", "f", "g", "k"]:
-      return [("dc:type", "dctypens:Image")]
+      return [(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["type"],
+        rdflibWrapper.namespaces["dctype"]["Image"]
+      )]
     if position6 in ["i", "j"]:
-      return [("dc:type", "dctypens:Sound")]
+      return [(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["type"], 
+        rdflibWrapper.namespaces["dctype"]["Sound"]
+      )]
     if position6 in ["p"] and position7 in ["c", "s"]:
-      return [("dc:type", "dctypens:Collection")]
+      return [(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["type"], 
+        rdflibWrapper.namespaces["dctype"]["Collection"]
+      )]
     if position6 in ["t"]:
-      return [("dc:type", "bibo:Manuscript")]
+      return [(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["type"],
+        rdflibWrapper.namespaces["bibo"]["Manuscript"]
+      )]
     
     
 class LanguageMapper(Mapper):
   """Mapování na kódy jazyků."""
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
-    
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
+  
   def mapData(self):
     # Získání language codes
     languageCodes = []
     
     extract = self.doc.getXPath("substring(//fixfield[@id='008'], 37, 2)")
-    languageCodes.append(extract)
+    languageCodes.append(extract[0])
     
     extract = self.doc.getXPath("//varfield[@id='040']/subfield[@label='b']")
     if not extract == []:
-      languageCodes.append(extract)
+      languageCodes.append(extract[0])
       
-    extract = self.doc.getXPath("//varfield[@id='041']/subfield")
+    extract = self.doc.doc.xpathEval("//varfield[@id='041']/subfield")
     if not extract == []:
       for subfield in extract:
         if subfield.noNsProp("label") in ["a", "b", "c", "d", "e", "f", "g", "h", "j"]:
-          languageCodes.append(subfield)
+          languageCodes.append(subfield.content)
         
     extract = self.doc.getXPath("//varfield[@id='242']/subfield[@label='y']")
     if not extract == []:
-      languageCodes.append(extract)
+      languageCodes.append(extract[0])
       
     extract = self.doc.getXPath("//varfield[@id='775']/subfield[@label='e']")
     if not extract == []:
-      languageCodes.append(extract)
+      languageCodes.append(extract[0])
       
     # Deduplikace language codes
     languageCodes = list(set(languageCodes))
@@ -119,22 +149,33 @@ class LanguageMapper(Mapper):
       uri = "http://purl.org/NET/marccodes/languages/%s" % (languageCode)
       valid = self.validateURI(uri)
       if valid:
-        validCountryCodes.append(("dc:language", uri))
+        validLanguageCodes.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["dc"]["language"],
+          rdflib.URIRef(uri)
+        ))
       
       # Lexvo
       uri = "http://www.lexvo.org/id/iso639-3/%s" % (languageCode)
       valid = self.validateURI(uri)
       if valid:
-        validCountryCodes.append(("dc:language", uri))
-          
-    return validLanguageCodes
-   
-   
+        validLanguageCodes.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["dc"]["language"],
+          rdflib.URIRef(uri)
+        ))
+    
+    if not validLanguageCodes == []:
+      return validLanguageCodes
+    else:      
+      return False
+
+
 class CountryMapper(Mapper):
   """Mapování na kódy států."""
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):    
     # Získání country codes
@@ -169,16 +210,23 @@ class CountryMapper(Mapper):
       valid = self.validateURI(uri)
       if valid:
         uri += "#location"
-        validCountryCodes.append(("dc:coverage", uri))
+        validCountryCodes.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["dc"]["coverage"],
+          rdflib.URIRef(uri)
+        ))
     
-    return validCountryCodes
+    if not validCountryCodes == []:
+      return validCountryCodes
+    else:
+      return False
     
     
 class GeographicAreaMapper(Mapper):
   """Mapování geografických oblastí na MARC Codes"""
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     geographyAreaCode = self.doc.getXPath("//varfield[@id='043']/subfield[@label='a']")
@@ -186,14 +234,22 @@ class GeographicAreaMapper(Mapper):
       uri = "http://purl.org/NET/marccodes/gacs/%s#location" % (geographyAreaCode[0])
       valid = self.validateURI(uri)
       if valid:
-        return [("dc:coverage", uri)]
+        return [(
+          self.resourceURI,
+          rdflibWrapper.namespaces["dc"]["coverage"],
+          rdflib.URIRef(uri)
+        )]
+      else:
+        return False
+    else:
+      return False
         
 
 class PSHMapper(Mapper):
   """Mapování z preferovaných hesel PSH v bibliografických záznamech na URI těchto hesel"""
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     pshTerms = self.doc.getXPath("//varfield[@id='650']/subfield[@label='a']")
@@ -206,8 +262,8 @@ class PSHMapper(Mapper):
 class AuthorMapper(Mapper):
   """Mapování jmen autorů z bibliografických záznamů na záznamy autoritní"""
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     author = self.doc.getXPath("//varfield[@id='100']/subfield[@label='a']")
@@ -219,8 +275,8 @@ class AuthorMapper(Mapper):
 class VIAFMapper(Mapper):
   """Mapování ze jmenných autoritních záznamů na VIAF."""
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     fmt = self.doc.getXPath("//fixfield[@id='FMT']")[0]
@@ -249,16 +305,20 @@ class VIAFMapper(Mapper):
           conceptId = docContext.xpathEval("//skos:Concept/@rdf:about")
           match = re.match(".*(?=\.)", conceptId[0].content) # Odstraní příponu typu souboru
           conceptId = match.group()
-          conceptId = "http://viaf.org/" + conceptId
+          conceptURI = "http://viaf.org/" + conceptId
           
-          return [("owl:sameAs", conceptId)]
+          return [(
+            self.resourceURI,
+            rdflibWrapper.namespaces["owl"]["sameAs"],
+            rdflib.URIRef(conceptURI)
+          )]
 
 
 class DBPediaMapper(Mapper):
   """Mapování na zdroje v DBPedii."""
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     # Extract English preferred and non-preferred headings
@@ -273,7 +333,11 @@ class DBPediaMapper(Mapper):
     doc = self.getParsedDoc(url)
     match = self.checkMatch(prefLabel, doc)
     if match:
-      results.append(("skos:exactMatch", match))
+      results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["skos"]["exactMatch"],
+        rdflib.URIRef(match)
+      ))
     
     # Mapování nepreferovaného znění hesla
     for altLabel in altLabels:
@@ -281,9 +345,16 @@ class DBPediaMapper(Mapper):
       doc = self.getParsedDoc(url)
       match = self.checkMatch(altLabel, doc)
       if match:
-        results.append(("skos:closeMatch", match))
-    
-    return results
+        results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["skos"]["closeMatch"],
+          rdflib.URIRef(match)
+        ))
+
+    if not results == []:
+      return results
+    else:
+      return False
     
   def checkMatch(self, label, doc):
     # This style of XPath queries must be used because 
@@ -298,26 +369,37 @@ class DBPediaMapper(Mapper):
 
 class LCSHMapper(Mapper):
 
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     record = MarcARecord(self.doc)
     prefLabel = record.getPrefLabelEN()
     altLabels = record.getNonprefLabelsEN()
     
-    result = []
+    results = []
     
     resultPrefLabel = self.getUrlForMatchingLabel(self.getSearchResults(prefLabel), prefLabel)
     if resultPrefLabel:
-      result.append(("skos:exactMatch", resultPrefLabel))
+      result.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["skos"]["exactMatch"],
+        rdflib.URIRef(resultPrefLabel)
+      ))
     
     for altLabel in altLabels:
       resultAltLabel = self.getUrlForMatchingLabel(self.getSearchResults(altLabel), altLabel)
       if resultAltLabel:
-        result.append(("skos:closeMatch", resultAltLabel))
-        
-    return result
+        result.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["skos"]["closeMatch"],
+          rdflib.URIRef(resultAltLabel)
+        ))
+
+    if not results == []:
+      return results
+    else:
+      return False
     
   def getSearchResults(self, label):
     baseurl = "http://id.loc.gov/authorities/label/"
@@ -342,8 +424,8 @@ class LCSHMapper(Mapper):
 
 class GeonamesMapper(Mapper):
 
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     pass
@@ -351,8 +433,8 @@ class GeonamesMapper(Mapper):
 
 class OpenLibraryMapper(Mapper):
 
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
     pass
@@ -360,8 +442,8 @@ class OpenLibraryMapper(Mapper):
 
 class PublisherMapper(Mapper):
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
   
   def mapData(self):
     # pracujeme s: http://sigma.nkp.cz/F/?func=file&file_name=find-b&local_base=NAK
@@ -384,22 +466,26 @@ class PublisherMapper(Mapper):
 
 class SiglaMapper(Mapper):
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
   
   def mapData(self):
     # pracujeme s: http://sigma.nkp.cz/F/?func=file&file_name=find-b&local_base=ADR
-    sigla = self.doc.xpathEval("varfield[@id='040']/subfield[@label='a']")
+    sigla = self.doc.getXPath("//varfield[@id='040']/subfield[@label='a']")
     if not sigla == []:
-      sigla = sigla[0].content
+      sigla = sigla[0]
       doc = self.searchAlephBase("http://sigma.nkp.cz", "ADR", "SIG", sigla)
       if doc:
         xpath = "present/record/doc_number[metadata/oai_marc/varfield[@id='SGL']/subfield[@label='a']/text()='%s']" % (sigla)
-        docNum = doc.xpathEval(xpath)
+        docNum = doc.getXPath(xpath)
         if not docNum == []:
-          docNum = docNum[0].content.lstrip("0")
+          docNum = docNum[0].lstrip("0")
           uri = "http://sigma.nkp.cz/X?op=doc-num&base=ADR&doc-num=" + docNum
-          return [("dc:creator", uri)]
+          return [(
+            self.representationURI,
+            rdflibWrapper.namespaces["dc"]["creator"], 
+            rdflib.URIRef(uri)
+          )]
         else:
           return False
       else:
@@ -410,8 +496,8 @@ class SiglaMapper(Mapper):
     
 class PSHQualifierMapper(Mapper):
   
-  def __init__(self, doc):
-    Mapper.__init__(self, doc)
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def MapData(self):
     # použít dict pro překlad PSH kvalifikátorů na URI konceptů, které zastupují
@@ -463,42 +549,76 @@ class PSHQualifierMapper(Mapper):
       'au': 'http://data.techlib.cz/resource/psh/116'
     }
     qualifier = self.doc.getXPath("//varfield[@id='150']/subfield[@label='x']")[0]
-    return [("skos:broaderTransitive", qdict[qualifier])] # Co bude predikátem?
+    return [(
+      self.resourceURI,
+      rdflibWrapper.namespaces["skos"]["broaderTransitive"],
+      rdflib.URIRef(qdict[qualifier])
+    )] # Co bude predikátem?
     
 
 class ISSNMapper(Mapper):
   """ISSN to system number translation. Returns the URI of the previous version."""
   
-  def __init__(self, doc, linkType):
-    # linkType = {"previous" | "following" | "physical" }
-    Mapper.__init__(self, doc)
-    self.type = linkType
+  def __init__(self, doc, , resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
+    self.results = []
     
   def mapData(self):
-    if linkType == "previous":
-      ISSN = self.doc.xpathEval("//varfield[@id='780']/subfield[@label='x']")
-      predicate = "dbpedia:previous"
-    if linkType == "following":
-      ISSN = self.doc.xpathEval("//varfield[@id='785']/subfield[@label='x']")
-      predicate = "dbpedia:following"
-    if linkType == "physical":
-      ISSN = self.doc.xpathEval("//varfield[@id='776']/subfield[@label='x']")
-      predicate = "dcterms:hasVersion"
-    else:
-      raise ValueError("Incorrect ISSN link type.")
+    # ISSN předcházející verze
+    result = self.mapISSN("//varfield[@id='780']/subfield[@label='x']", rdflibWrapper.namespaces["dbpedia"]["previous"])
       
+    # ISSN následující verze
+    result = self.mapISSN("//varfield[@id='785']/subfield[@label='x']", rdflibWrapper.namespaces["dbpedia"]["following"])
+    
+    # Navázané ISSN
+    result = self.mapISSN("//varfield[@id='776']/subfield[@label='x']", rdflibWrapper.namespaces["skos"]["related"])
+
+    # Nespecifikovaný vztah na jiné ISSN
+    result = self.mapISSN('//varfield[@id="787"]/subfield[@label="x"]', rdflibWrapper.namespaces["skos"]["related"])
+    
+    # ISSN doplňkové verze  
+    result = self.mapISSN('//varfield[@id="770"][@i1="0"]/subfield[@label="x"]', rdflibWrapper.namespaces["dcterms"]["hasPart"])
+    
+    # ISSN - suplement/rodič 
+    # '//varfield[@id="772"]/subfield[@label="x"]'
+    
+    # ISSN - má překlad
+    result = self.mapISSN('//varfield[@id="767"][@i1="0"]/subfield[@label="x"]', rdflibWrapper.namespaces["frbr"]["translation"])
+    
+    # ISSN - je překladem
+    result = self.mapISSN('varfield[@id="765"][@i1="0"]/subfield[@label="x"]', rdflibWrapper.namespaces["bibo"]["translationOf"])
+    
+
+    if not self.result == []:
+      return self.results
+    else:
+      return False
+      
+  def getISSNURI(self, ISSN):
     if not ISSN == []:
-      ISSN = ISSN[0].content
+      ISSN = ISSN[0]
       doc = self.searchAlephBase("http://aleph.techlib.cz", "STK02", "SSN", ISSN.strip())
       if doc:
-        sysno = doc.xpathEval("present/record/doc_number")
+        sysno = doc.getXPath("present/record/doc_number")
         if not sysno == []:
-          sysno = sysno[0].content.lstrip("0")
+          sysno = re.search("\d+$", sysno[0].content).group(0).lstrip("0")
           uri = "http://data.techlib.cz/resource/issn/%s" % (sysno)
-          return [(predicate, uri)]
+          return uri
         else:
           return False
       else:
         return False
+    else:
+      return False
+      
+  def mapISSN(self, xpath, predicate):
+    ISSN = self.doc.getXPath(xpath)
+    issnURI = self.getISSNURI(ISSN)
+    if issnURI:
+      self.results.append((
+        self.resourceURI,
+        predicate,
+        rdflib.URIRef(issnURI)
+      ))
     else:
       return False

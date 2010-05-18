@@ -3,9 +3,10 @@
 
 from alephXServerWrapper import *
 from Mapper import *
+import rdflib
+import rdflibWrapper
 
-
-class Callback(Object):
+class Callback():
   
   def __init__(self, baseName):
     self.results = [] # (subject, predicate, object)
@@ -37,10 +38,10 @@ class Callback(Object):
   def addStaticTriplesGlobal(self):
     """Method for adding triples that are stable for each database."""
     triples = [
-      (self.representationURI, "dcterms:rigthsHolder", "http://www.techlib.cz"),
-      (self.representationURI, "cc:attributionName", "Národní technická knihovna"),
+      (self.representationURI, rdflibWrapper.namespaces["dcterms"]["rigthsHolder"], rdflib.URIRef("http://www.techlib.cz")),
+      (self.representationURI, "cc:attributionName", rdflib.Literal("Národní technická knihovna", lang="cs")),
       (self.representationURI, "cc:attributionURL", self.representationURI),
-      (self.representationURI, "cc:license", "http://creativecommons.org/licenses/by-nc-sa/3.0/cz/"),
+      (self.representationURI, "cc:license", rdflib.URIRef("http://creativecommons.org/licenses/by-nc-sa/3.0/cz/")),
     ]
     self.addTriples(triples)
     
@@ -66,28 +67,45 @@ class STK02Callback(Callback):
     sysno = record.getXPath("//fixfield[@id='001']")[0]
     subject = re.search("\d+$", sysno).group(0).lstrip("0")
     subject = "http://data.techlib.cz/resource/issn/%s" % (subject)
-    self.resourceURI = subject
-    self.representationURI = subject + ".rdf"
-    self.results.append((self.representationURI, "dc:identifier", sysno))
+    self.resourceURI = rdflib.URIRef(subject)
+    self.representationURI = rdflib.URIRef(subject + ".rdf")
+    self.results.append((
+      self.representationURI,
+      rdflibWrapper.namespaces["dc"]["identifier"],
+      rdflib.Literal(sysno)
+    ))
     
     # Last modified date
     lastModified = record.getXPath("//fixfield[@id='005']")[0]
     parseDate = re.search("^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})", lastModified)
     lastModified = "%s-%s-%s+%s:%s" % (parseDate.group(1), parseDate.group(2), parseDate.group(3), parseDate.group(4), parseDate.group(5))
-    self.results.append((self.representationURI, "dcterms:modified", lastModified)) # Jak přidat anotaci XSD type?
+    self.results.append((
+      self.representationURI, 
+      rdflibWrapper.namespaces["dcterms"]["modified"], 
+      rdflib.Literal(lastModified, datatype = rdflibWrapper.namespaces["xsd"]["date"])
+    ))
     
     # Short title
     shortTitle = record.getXPath('//varfield[@id="210"][@i1="1"]/subfield[@label="a"]')
     if not shortTitle == []:
       shortTitle = shortTitle[0]
-      self.results.append((self.resourceURI, "bibo:shortTitle", shortTitle))
+      self.results.append((
+        self.resourceURI, 
+        rdflibWrapper.namespaces["bibo"]["shortTitle"],
+        rdflib.Literal(shortTitle)
+      ))
     
     # Publisher      
-    publisher = record.getXPath('//varfield[@id="260"]/subfield[@label="b"]')
-    if not publisher == []:
-      publisher = publisher[0]
-      self.results.append((self.resourceURI, "dc:publisher", publisher))
-      # Namapovat vydavatele? PublisherMapper
+    publishers = record.getXPath('//varfield[@id="260"]/subfield[@label="b"] | //varfield[@id="720"][@i1="2"]/subfield[@label="a"]')
+    if not publishers == []:
+      for publisher in publishers:
+        publisher = publisher.strip().strip(",").strip(";").strip(":").strip()
+        self.results.append((
+          self.resourceURI, 
+          rdflibWrapper.namespaces["dc"]["publisher"],
+          rdflib.Literal(publisher)
+        ))
+        # Namapovat vydavatele? PublisherMapper
 
     # Place of publication
     publicationPlace = record.getXPath('//varfield[@id="260"]/subfield[@label="a"]')
@@ -97,11 +115,76 @@ class STK02Callback(Callback):
       #   - predikát?
       #   - zdali to nevypovídá spíše o vydavateli?
       # self.results.append((self.resourceURI, "", publicationPlace))
+      
+    # ISSN
+    issns = record.getXPath('//varfield[@id="022"]/subfield[@label="a" or @label="l"]')
+    if not issns == []:
+      # Počítá s tím, že nakonec proběhne deduplikace triplů.
+      for issn in issns:
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["bibo"]["issn"],
+          rdflib.Literal(issn)
+        ))
 
+    # Date
+    date = record.getXPath('//varfield[@id="260"]/subfield[@label="c"]')
+    if not date == []:
+      date = date[0]
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["date"],
+        rdflib.Literal(date)
+      ))
+      # Vyčistit a dodělat rozmezí dat!
+      
+    # Titles
+    titles = record.getXPath('//varfield[@id="222"][@i2="0"]/subfield[@label="a"] | //varfield[@id="245"][@i1="1"]/subfield[@label="a"] | //varfield[@id="246"]/subfield[@label="a"]')
+    if not titles == []:
+      for title in titles:
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["dc"]["title"],
+          rdflib.Literal(title)
+        ))
+    
+    # Short title
+    shortTitle = record.getXPath('//varfield[@id="210"][@i1="1"][@i2=" "]/subfield[@label="b"]')
+    if not shortTitle == []:
+      shortTitle = shortTitle[0]
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["bibo"]["shortTitle"],
+        rdflib.Literal(shortTitle)
+      ))
+      
+    # Language
+    languages = LanguageMapper(record).mapData()
+    if languages:
+      [self.results.append(language) for language in languages]
+    
+    # ISSN links
+    issnLinks = ISSNMapper(record).mapData()
+    if issnLinks:
+      [self.results.append(issnLink) for issnLink in issnLinks]
+      
+    # Online version of the journal
+    onlineVersion = record.getXPath('//varfield[@id="856"][@i1="4"]/subfield[@label="u"]')
+    if not onlineVersion == []:
+      onlineVersion = onlineVersion[0]
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["dcterms"]["hasVersion"],
+        rdflib.URIRef(onlineVersion)
+      ))
+      # Validate onlineVersion URI?
+      
   def addStaticTriplesBase(self):
-    triples = [
-      (self.resourceURI, "rdf:type", "bibo:Periodical"),
-    ]
+    triples = [(
+      self.resourceURI,
+      rdflibWrapper.namespaces["rdf"]["type"], 
+      rdflibWrapper.namespaces["bibo"]["Periodical"]
+    ),]
     self.addTriples(triples)
     
     

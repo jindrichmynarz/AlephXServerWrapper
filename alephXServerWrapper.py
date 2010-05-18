@@ -1,47 +1,20 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
-import math
-import urllib
-import urllib2
-import libxml2
-import time
-import os, sys
-import sqlite3
+import math, urllib, urllib2, libxml2, time, os, sys, sqlite3
 
 failed = []
 
-class XServer():
+class XServer(object):
 
   def __init__(self, endpoint, debug = False):
     """Parametr 'endpoint' je URL Aleph X Serveru, 'debug' s hodnotou True povoluje výpisy"""
     
     self.endpoint = endpoint
     self.debug = debug
-              
-    
-class Record():
-
-  def __init__(self, doc):
-    self.doc = doc
-    
-  def getXPath(self, xpath):
-    """Vrátí pole výsledků pro XPath dotaz"""
-    
-    results = self.doc.xpathEval(xpath)
-    output = []
-    for result in results:
-      output.append(result.content)
-    return output
-    
-  def getMarc(self, field, subfield):
-    """Vrátí pole výsledků pro hledané pole ('field') a podpole ('subfield')"""
- 
-    xpath = "//varfield[@id='%s']/subfield[@label='%s']" % (str(field), str(subfield))
-    return self.getXPath(xpath)
 
 
-class Base():
+class Base(object):
  
   def __init__(self, xServer, baseID):
     self.xServer = xServer
@@ -108,7 +81,7 @@ class Base():
     return mid
 
  
-class Crawler():
+class Crawler(object):
 
   def __init__(self, base):
     self.status = False
@@ -155,7 +128,28 @@ class Crawler():
     if keyboardInterrupt == True:
       sys.exit(0)
     
+
+class Record(object):
+
+  def __init__(self, doc):
+    self.doc = doc
     
+  def getXPath(self, xpath):
+    """Vrátí pole výsledků pro XPath dotaz"""
+    
+    results = self.doc.xpathEval(xpath)
+    output = []
+    for result in results:
+      output.append(result.content)
+    return output
+    
+  def getMarc(self, field, subfield):
+    """Vrátí pole výsledků pro hledané pole ('field') a podpole ('subfield')"""
+ 
+    xpath = "//varfield[@id='%s']/subfield[@label='%s']" % (str(field), str(subfield))
+    return self.getXPath(xpath)
+    
+        
 class MarcARecord(Record):
  
   def __init__(self, record):
@@ -203,7 +197,7 @@ class MarcARecord(Record):
     return self.getXPath("//varfield[@id='550'][subfield[@label='w']='g']/subfield[@label='a']")
     
  
-class PSHDB():
+class PSHDB(object):
  
   def __init__(self, purge=False):
     self.connection = False
