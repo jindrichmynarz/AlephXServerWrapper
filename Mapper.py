@@ -49,7 +49,7 @@ class Mapper():
     else:
       return False
 
-class DCMITypeMapper(Mapper):
+class DCTypeMapper(Mapper):
   """Mapování typu dokumentu na DCMI Types, resp. typy z dalších ontologií (BIBO, YAGO)."""
   
   def __init__(self, doc, resourceURI, representationURI):
@@ -559,7 +559,7 @@ class PSHQualifierMapper(Mapper):
 class ISSNMapper(Mapper):
   """ISSN to system number translation. Returns the URI of the previous version."""
   
-  def __init__(self, doc, , resourceURI, representationURI):
+  def __init__(self, doc, resourceURI, representationURI):
     Mapper.__init__(self, doc, resourceURI, representationURI)
     self.results = []
     
@@ -571,23 +571,35 @@ class ISSNMapper(Mapper):
     result = self.mapISSN("//varfield[@id='785']/subfield[@label='x']", rdflibWrapper.namespaces["dbpedia"]["following"])
     
     # Navázané ISSN
-    result = self.mapISSN("//varfield[@id='776']/subfield[@label='x']", rdflibWrapper.namespaces["skos"]["related"])
+    result = self.mapISSN("//varfield[@id='776']/subfield[@label='x']", rdflibWrapper.namespaces["dcterms"]["relation"])
 
     # Nespecifikovaný vztah na jiné ISSN
-    result = self.mapISSN('//varfield[@id="787"]/subfield[@label="x"]', rdflibWrapper.namespaces["skos"]["related"])
+    result = self.mapISSN('//varfield[@id="787"]/subfield[@label="x"]', rdflibWrapper.namespaces["dcterms"]["relation"])
     
     # ISSN doplňkové verze  
     result = self.mapISSN('//varfield[@id="770"][@i1="0"]/subfield[@label="x"]', rdflibWrapper.namespaces["dcterms"]["hasPart"])
     
+    # ISSN - doplněk
+    result = self.mapISSN('//varfield[@id="770"][@i1="1"]/subfield[@label="x"]', rdflibWrapper.namespaces["frbr"]["supplement"])
+
     # ISSN - suplement/rodič 
     # '//varfield[@id="772"]/subfield[@label="x"]'
+    
+    # ISSN - sloučeno s ...
+    # '//varfield[@id="785"][@i1="0"][@i2="7"]/subfield[@label="x"]'
+    # '//varfield[@id="785"][@i1="1"][@i2="7"]/subfield[@label="x"]'
+    
+    # ISSN - vytvořeno sloučením
+    # '//varfield[@id="780"][@i1="0"][@i2="4"]/subfield[@label="x"]'
+
+    # ISSN - rozděleno do ...
+    # '//varfield[@id="785"][@i1="0"][@i2="6"]/subfield[@label="x"]'
     
     # ISSN - má překlad
     result = self.mapISSN('//varfield[@id="767"][@i1="0"]/subfield[@label="x"]', rdflibWrapper.namespaces["frbr"]["translation"])
     
     # ISSN - je překladem
-    result = self.mapISSN('varfield[@id="765"][@i1="0"]/subfield[@label="x"]', rdflibWrapper.namespaces["bibo"]["translationOf"])
-    
+    result = self.mapISSN('varfield[@id="765"]/subfield[@label="x"]', rdflibWrapper.namespaces["bibo"]["translationOf"])
 
     if not self.result == []:
       return self.results
@@ -620,5 +632,26 @@ class ISSNMapper(Mapper):
         predicate,
         rdflib.URIRef(issnURI)
       ))
+    else:
+      return False
+
+   
+class LastModifiedDateMapper(Mapper):
+  """Maps the last modified data from fixfield 005"""
+  
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
+    
+  def mapData(self):
+    lastModified = self.doc.getXPath("//fixfield[@id='005']")
+    if not lastModified == []:
+      lastModified = lastModified[0]
+      parseDate = re.search("^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})", lastModified)
+      lastModified = "%s-%s-%s+%s:%s" % (parseDate.group(1), parseDate.group(2), parseDate.group(3), parseDate.group(4), parseDate.group(5))
+      return [(
+        self.representationURI, 
+        rdflibWrapper.namespaces["dcterms"]["modified"], 
+        rdflib.Literal(lastModified, datatype = rdflibWrapper.namespaces["xsd"]["date"])
+      )]
     else:
       return False

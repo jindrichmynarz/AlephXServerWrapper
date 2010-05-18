@@ -6,6 +6,11 @@ from Mapper import *
 import rdflib
 import rdflibWrapper
 
+def report(message):
+  """Helper debugging function"""
+  print message
+  # Potenciálně zapisování do logu pomocí package logging
+  
 class Callback():
   
   def __init__(self, baseName):
@@ -17,6 +22,7 @@ class Callback():
     
   def commitData(self):
     """Saves self.results into RDFLib."""
+    # To implement
     pass
     
   def writeUnmapped(self):
@@ -37,11 +43,31 @@ class Callback():
     
   def addStaticTriplesGlobal(self):
     """Method for adding triples that are stable for each database."""
-    triples = [
-      (self.representationURI, rdflibWrapper.namespaces["dcterms"]["rigthsHolder"], rdflib.URIRef("http://www.techlib.cz")),
-      (self.representationURI, "cc:attributionName", rdflib.Literal("Národní technická knihovna", lang="cs")),
-      (self.representationURI, "cc:attributionURL", self.representationURI),
-      (self.representationURI, "cc:license", rdflib.URIRef("http://creativecommons.org/licenses/by-nc-sa/3.0/cz/")),
+    triples = [(
+        self.representationURI, 
+        rdflibWrapper.namespaces["dcterms"]["rigthsHolder"], 
+        rdflib.URIRef("http://www.techlib.cz")
+      ), (
+        self.representationURI,
+        rdflibWrapper.namespaces["cc"]["attributionName"],
+        rdflib.Literal("Národní technická knihovna", lang="cs")
+      ), (
+        self.representationURI,
+        rdflibWrapper.namespaces["cc"]["attributionName"],
+        rdflib.Literal("National Technical Library", lang="en")
+      ), (
+        self.representationURI,
+        rdflibWrapper.namespaces["cc"]["attributionURL"],
+        self.representationURI
+      ), (
+        self.representationURI,
+        rdflibWrapper.namespaces["cc"]["license"],
+        rdflib.URIRef("http://creativecommons.org/licenses/by-nc-sa/3.0/cz/")
+      ), (
+        self.representationURI,
+        rdflibWrapper.namespaces["dcterms"]["rightsHolder"],
+        rdflib.URIRef("http://www.techlib.cz")
+      ),
     ]
     self.addTriples(triples)
     
@@ -76,14 +102,9 @@ class STK02Callback(Callback):
     ))
     
     # Last modified date
-    lastModified = record.getXPath("//fixfield[@id='005']")[0]
-    parseDate = re.search("^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})", lastModified)
-    lastModified = "%s-%s-%s+%s:%s" % (parseDate.group(1), parseDate.group(2), parseDate.group(3), parseDate.group(4), parseDate.group(5))
-    self.results.append((
-      self.representationURI, 
-      rdflibWrapper.namespaces["dcterms"]["modified"], 
-      rdflib.Literal(lastModified, datatype = rdflibWrapper.namespaces["xsd"]["date"])
-    ))
+    lastModified = LastModifiedDateMapper(record, self.resourceURI, self.representationURI).mapData()
+    if lastModified:
+      self.results.append(lastModified[0])     
     
     # Short title
     shortTitle = record.getXPath('//varfield[@id="210"][@i1="1"]/subfield[@label="a"]')
@@ -159,7 +180,7 @@ class STK02Callback(Callback):
       ))
       
     # Language
-    languages = LanguageMapper(record).mapData()
+    languages = LanguageMapper(record, self.resourceURI, self.representationURI).mapData()
     if languages:
       [self.results.append(language) for language in languages]
     
@@ -192,12 +213,109 @@ class STK10Callback(Callback):
   
   def __init__(self, baseName="STK10"):
     Callback.__init__(self)
-    
+    self.pshTranslateDict = {}
+  
+  def insertSKOSRelations(self, terms, predicate):
+    if not terms == []:
+      for term in terms:
+        try:
+          termTranslated = self.pshTranslateDict[term]
+          self.results.append((
+            self.resourceURI,
+            rdflibWrapper.namespaces["skos"][predicate]
+            rdflib.URIRef(termTranslated)
+          ))
+        except KeyError:
+          report("[ERROR] term %s doesn't have a translation." % (term))
+  
   def main(self, record):
-    pass
+    sysno = record.getXPath("//fixfield[@id='001']")[0]
+    subject = re.search("\d+$", sysno).group(0).lstrip("0")
+    subject = "http://data.techlib.cz/resource/psh/%s" % (subject)
+    self.resourceURI = rdflib.URIRef(subject)
+    self.representationURI = rdflib.URIRef(subject + ".rdf")
+
+    # Identifier
+    self.results.append((
+      self.representationURI,
+      rdflibWrapper.namespaces["dc"]["identifier"],
+      rdflib.Literal(sysno)
+    ))
+    
+    # Last modified date
+    lastModified = LastModifiedDateMapper(record, self.resourceURI, self.representationURI).mapData()
+    if lastModified:
+      self.results.append(lastModified[0])     
+      
+    # Sigla of the creator    
+    sigla = SiglaMapper(record, self.resourceURI, self.representationURI).mapData()
+    if sigla:
+      self.results.append(sigla[0])
+    
+    marcARecord = MarcARecord(record)
+    if marcARecord.isPSH():
+      # Preferred label in Czech
+      prefLabelCS = marcARecord.getPrefLabelCS()
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["skos"]["prefLabel"],
+        rdflib.Literal(prefLabelCS, lang="cs")
+      ))
+      
+      # Preferred label in English
+      prefLabelEN = marcARecord.getPrefLabelEN()
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["skos"]["prefLabel"],
+        rdflib.Literal(prefLabelEN, lang="en")
+      ))
+    
+      # Non-preferred labels in Czech
+      nonprefLabelsCS = marcARecord.getNonprefLabelsCS()
+      for nonprefLabelCS in nonprefLabelsCS:
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["skos"]["altLabel"],
+          rdflib.Literal(nonprefLabelCS, lang="cs")
+        ))
+        
+      # Non-preferred labels in English
+      nonprefLabelsEN = marcARecord.getNonprefLabelsEN()
+      for nonprefLabelEN in nonprefLabelsEN:
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["skos"]["altLabel"],
+          rdflib.Literal(nonprefLabelEN, lang="en")
+        ))
+        
+      # Pro následující je zapotřebí dodělat překlad prefLabel => ID (resp. URI), jako externí tabulku/CSV/SQLite bázi?
+      file = open("pshTranslateTable.csv", "r")
+      pshTranslateTable = file.read()
+      file.close()
+      pshTranslateTable = pshTranslateTable.split("\n")
+      for pshTranslateLine in pshTranslateTable:
+        line = pshTranslateLine.split(";")
+        self.pshTranslateDict[line[0]] = line[1]
+        
+      # Related terms
+      relatedTerms = marcARecord.getRelatedTerms()
+      self.insertSKOSRelations(relatedTerms, "related")
+      
+      # Narrower terms
+      narrowerTerms = marcARecord.getNarrowerTerms()
+      self.insertSKOSRelations(narrowerTerms, "narrower")
+      
+      # Broader terms
+      broaderTerms = marcARecord.getBroaderTerms()
+      self.insertSKOSRelations(broaderTerms, "broader")
     
   def addStaticTriplesBase(self):
-    pass
+    triples = [(
+      self.resourceURI,
+      rdflibWrapper.namespaces["rdf"]["type"],
+      rdflibWrapper.namespaces["skos"]["Concept"]
+    )]
+    self.addTriples(triples)
 
 
 class STK01Callback(Callback):
@@ -209,4 +327,9 @@ class STK01Callback(Callback):
     pass
     
   def addStaticTriplesBase(self):
-    pass
+    triples = [(
+      self.representationURI,
+      rdflibWrapper.namespaces["rdf"]["type"],
+      rdflibWrapper.namespaces["dcterms"]["BibliographicResource"]
+    )]
+    self.addTriples(triples)

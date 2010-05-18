@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
-import math, urllib, urllib2, libxml2, time, os, sys, sqlite3
+import math, urllib, urllib2, libxml2, time, os, sys, sqlite3, logging
 
 failed = []
+
+LOG_FILENAME = "alephXServerWrapper.log"
+logging.basicConfig(filename = LOG_FILENAME, level = logging.DEBUG)
 
 class XServer(object):
 
@@ -93,6 +96,7 @@ class Crawler(object):
  
   def crawl(self, callback, sleep = 0.05):
     """Postupně projde všechny záznamy v databázi a pro každý zavolá 'callback'"""
+    logging.debug("Počáteční status: %s" % (self.status))
     if self.status == False:
       try:
         resume = file("crawlerStatus.txt", "r")
@@ -103,12 +107,13 @@ class Crawler(object):
       
     begin = int(self.status)
     baseLen = self.base.getRecordCount()
+    logging.debug("Délka crawlované báze: %d" % (baseLen))
     baseRange = range(begin, baseLen + 1)
     try:
       for i in baseRange:
         time.sleep(sleep) # Slušný crawler čeká sekundu mezi požadavky!
         self.status = str(i)
-        callback(self.base.getParsedRecord(i), i)
+        callback(self.base.getParsedRecord(i))
     except KeyboardInterrupt:
         self.saveStatus(i, True)        
     except:
