@@ -118,7 +118,7 @@ class LanguageMapper(Mapper):
     # Získání language codes
     languageCodes = []
     
-    extract = self.doc.getXPath("substring(//fixfield[@id='008'], 37, 2)")
+    extract = self.doc.getXPath("substring(//fixfield[@id='008'], 36, 3)")
     languageCodes.append(extract[0])
     
     extract = self.doc.getXPath("//varfield[@id='040']/subfield[@label='b']")
@@ -181,7 +181,7 @@ class CountryMapper(Mapper):
     # Získání country codes
     countryCodes = []
 
-    extract = self.doc.getXPath("substring(//fixfield[@id='008'], 17, 2)")
+    extract = self.doc.getXPath("substring(//fixfield[@id='008'], 16, 3)").rstrip("-")
     countryCodes.append(extract)
 
     extract = self.doc.getXPath("//fixfield[@id='044']/subfield[@label='a']")

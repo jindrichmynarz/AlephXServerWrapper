@@ -116,6 +116,25 @@ class STK02Callback(Callback):
         rdflib.Literal(shortTitle)
       ))
     
+    # Universal Decimal Classification
+    udc = record.getXPath('//varfield[@id="080"]/subfield[@label="a"]')
+    if not udc == []:
+      udc = udc[0]
+      bnodeID = rdflib.BNode()
+      self.addTriples([(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["subject"],
+        bnodeID
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["skos"]["prefLabel"],
+        rdflib.Literal(udc)
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["dcam"]["memberOf"],
+        rdflibWrapper.namespaces["dcterms"]["UDC"]
+      )])
+    
     # Publisher      
     publishers = record.getXPath('//varfield[@id="260"]/subfield[@label="b"] | //varfield[@id="720"][@i1="2"]/subfield[@label="a"]')
     if not publishers == []:
