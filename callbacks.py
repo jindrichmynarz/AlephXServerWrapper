@@ -22,8 +22,8 @@ class Callback():
     
   def commitData(self):
     """Saves self.results into RDFLib."""
-    # To implement
-    pass
+    rdflibWrapper.commitData(self.results)
+    self.results = []
     
   def writeUnmapped(self):
     """Saves unmapped data to output CSV."""
@@ -32,8 +32,71 @@ class Callback():
     file = open(filename, "w")
     file.write("\n".join(map((lambda unmap: ";".join(unmap)), self.unmapped)))
     file.close()
-    
-  def main(self, record):
+  
+  def getIdentifiers(self, uriBase):
+    sysno = self.record.getXPath("//fixfield[@id='001']")[0]
+    subject = re.search("\d+$", sysno).group(0).lstrip("0")
+    subject = "http://data.techlib.cz/resource/%s/%s" % (uriBase, subject)
+    self.resourceURI = rdflib.URIRef(subject)
+    self.representationURI = rdflib.URIRef(subject + ".rdf")
+    self.results.append((
+      self.representationURI,
+      rdflibWrapper.namespaces["dc"]["identifier"],
+      rdflib.Literal(sysno)
+    ))
+  
+  def getLastModifiedDate(self):
+    """Extracts the date of last modification"""
+    lastModified = LastModifiedDateMapper(self.record, self.resourceURI, self.representationURI).mapData()
+    if lastModified:
+      self.results.append(lastModified[0])
+  
+  def getDataFromFixfield008(self):
+    """Extract and map the data from fixfield 008"""
+    fixfield008Results = Fixfield008Mapper(self.record, self.resourceURI, self.representationURI).mapData()
+    if fixfield008Results:
+      self.addTriples(fixfield008Results)
+
+  def getPublicationDate(self):
+    date = self.record.getXPath('//varfield[@id="260"]/subfield[@label="c"]')
+    if not date == []:
+      date = date[0]
+      # Oříznout všechny nenumerické znaky?
+      # Co se závorkami a otazníky?
+      # date = re.search(".*(\d{4}).*", date) 
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["date"],
+        rdflib.Literal(date)
+      ))
+      # Vyčistit a dodělat rozmezí dat!
+  
+  def getPublisher(self):
+    publishers = self.record.getXPath('//varfield[@id="260"]/subfield[@label="b"] | //varfield[@id="720"][@i1="2"]/subfield[@label="a"]')
+    if not publishers == []:
+      for publisher in publishers:
+        publisher = publisher.strip().rstrip(",").rstrip(";").rstrip(":").rstrip()
+        bnodeID = rdflib.BNode()
+        self.addTriples([(
+          self.resourceURI, 
+          rdflibWrapper.namespaces["dc"]["publisher"],
+          rdflib.Literal(publisher)
+        )])
+    placeOfPublication = self.record.getXPath('//varfield[@id="260"]/subfield[@label="a"]')
+    if not placeOfPublication == []:
+      placeOfPublication = placeOfPublication[0].strip(":").strip(";").strip()
+      self.addTriples([(
+        self.resourceURI, 
+        rdflibWrapper.namespaces["dc"]["publisher"],
+        bnodeID
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["dbpedia"]["locatedIn"],
+        rdflib.Literal(placeOfPublication)
+      )])
+      # Namapovat vydavatele? PublisherMapper
+        
+  def main(self):
     """Main data extraction. Must be overwritten by a child class."""
     pass
   
@@ -75,13 +138,16 @@ class Callback():
     """Method for adding triples that are stable for the specific database. Must be overwritten by a child class."""
     pass
     
-  def run(self):
+  def run(self, record):
     """Runs the callback."""
+    self.record = record
     self.main()
     self.addStaticTriplesGlobal()
     self.addStaticTriplesBase()
     self.commitData()
     self.writeUnmapped()
+    if len(self.results) > 1000:
+      self.commit()
   
   
 class STK02Callback(Callback):
@@ -89,25 +155,18 @@ class STK02Callback(Callback):
   def __init__(self, baseName="STK02"):
     Callback.__init__(self)
     
-  def main(self, record):
-    sysno = record.getXPath("//fixfield[@id='001']")[0]
-    subject = re.search("\d+$", sysno).group(0).lstrip("0")
-    subject = "http://data.techlib.cz/resource/issn/%s" % (subject)
-    self.resourceURI = rdflib.URIRef(subject)
-    self.representationURI = rdflib.URIRef(subject + ".rdf")
-    self.results.append((
-      self.representationURI,
-      rdflibWrapper.namespaces["dc"]["identifier"],
-      rdflib.Literal(sysno)
-    ))
+  def main(self):
+    # Write URIs & identifiers
+    self.getIdentifiers("issn")
     
+    # Mapping the fixfield 008
+    self.getDataFromFixfield008()
+      
     # Last modified date
-    lastModified = LastModifiedDateMapper(record, self.resourceURI, self.representationURI).mapData()
-    if lastModified:
-      self.results.append(lastModified[0])     
+    self.getLastModifiedDate()   
     
     # Short title
-    shortTitle = record.getXPath('//varfield[@id="210"][@i1="1"]/subfield[@label="a"]')
+    shortTitle = self.record.getXPath('//varfield[@id="210"][@i1="1"]/subfield[@label="a"]')
     if not shortTitle == []:
       shortTitle = shortTitle[0]
       self.results.append((
@@ -117,7 +176,7 @@ class STK02Callback(Callback):
       ))
     
     # Universal Decimal Classification
-    udc = record.getXPath('//varfield[@id="080"]/subfield[@label="a"]')
+    udc = self.record.getXPath('//varfield[@id="080"]/subfield[@label="a"]')
     if not udc == []:
       udc = udc[0]
       bnodeID = rdflib.BNode()
@@ -127,7 +186,7 @@ class STK02Callback(Callback):
         bnodeID
       ), (
         bnodeID,
-        rdflibWrapper.namespaces["skos"]["prefLabel"],
+        rdflibWrapper.namespaces["rdf"]["value"],
         rdflib.Literal(udc)
       ), (
         bnodeID,
@@ -136,19 +195,10 @@ class STK02Callback(Callback):
       )])
     
     # Publisher      
-    publishers = record.getXPath('//varfield[@id="260"]/subfield[@label="b"] | //varfield[@id="720"][@i1="2"]/subfield[@label="a"]')
-    if not publishers == []:
-      for publisher in publishers:
-        publisher = publisher.strip().strip(",").strip(";").strip(":").strip()
-        self.results.append((
-          self.resourceURI, 
-          rdflibWrapper.namespaces["dc"]["publisher"],
-          rdflib.Literal(publisher)
-        ))
-        # Namapovat vydavatele? PublisherMapper
+    self.getPublisher()
 
     # Place of publication
-    publicationPlace = record.getXPath('//varfield[@id="260"]/subfield[@label="a"]')
+    publicationPlace = self.record.getXPath('//varfield[@id="260"]/subfield[@label="a"]')
     if not publicationPlace == []:
       publicationPlace = publicationPlace[0]
       # Dodělat:
@@ -157,7 +207,7 @@ class STK02Callback(Callback):
       # self.results.append((self.resourceURI, "", publicationPlace))
       
     # ISSN
-    issns = record.getXPath('//varfield[@id="022"]/subfield[@label="a" or @label="l"]')
+    issns = self.record.getXPath('//varfield[@id="022"]/subfield[@label="a" or @label="l"]')
     if not issns == []:
       # Počítá s tím, že nakonec proběhne deduplikace triplů.
       for issn in issns:
@@ -168,16 +218,8 @@ class STK02Callback(Callback):
         ))
 
     # Date
-    date = record.getXPath('//varfield[@id="260"]/subfield[@label="c"]')
-    if not date == []:
-      date = date[0]
-      self.results.append((
-        self.resourceURI,
-        rdflibWrapper.namespaces["dc"]["date"],
-        rdflib.Literal(date)
-      ))
-      # Vyčistit a dodělat rozmezí dat!
-      
+    self.getPublicationDate()
+    
     # Titles
     titles = record.getXPath('//varfield[@id="222"][@i2="0"]/subfield[@label="a"] | //varfield[@id="245"][@i1="1"]/subfield[@label="a"] | //varfield[@id="246"]/subfield[@label="a"]')
     if not titles == []:
@@ -189,7 +231,7 @@ class STK02Callback(Callback):
         ))
     
     # Short title
-    shortTitle = record.getXPath('//varfield[@id="210"][@i1="1"][@i2=" "]/subfield[@label="b"]')
+    shortTitle = self.record.getXPath('//varfield[@id="210"][@i1="1"][@i2=" "]/subfield[@label="b"]')
     if not shortTitle == []:
       shortTitle = shortTitle[0]
       self.results.append((
@@ -199,17 +241,17 @@ class STK02Callback(Callback):
       ))
       
     # Language
-    languages = LanguageMapper(record, self.resourceURI, self.representationURI).mapData()
+    languages = LanguageMapper(self.record, self.resourceURI, self.representationURI).mapData()
     if languages:
       [self.results.append(language) for language in languages]
     
     # ISSN links
-    issnLinks = ISSNMapper(record).mapData()
+    issnLinks = ISSNMapper(self.record).mapData()
     if issnLinks:
       [self.results.append(issnLink) for issnLink in issnLinks]
       
     # Online version of the journal
-    onlineVersion = record.getXPath('//varfield[@id="856"][@i1="4"]/subfield[@label="u"]')
+    onlineVersion = self.record.getXPath('//varfield[@id="856"][@i1="4"]/subfield[@label="u"]')
     if not onlineVersion == []:
       onlineVersion = onlineVersion[0]
       self.results.append((
@@ -217,7 +259,7 @@ class STK02Callback(Callback):
         rdflibWrapper.namespaces["dcterms"]["hasVersion"],
         rdflib.URIRef(onlineVersion)
       ))
-      # Validate onlineVersion URI?
+      # Validate onlineVersion URI? bibo:uri datatype property?
       
   def addStaticTriplesBase(self):
     triples = [(
@@ -247,31 +289,19 @@ class STK10Callback(Callback):
         except KeyError:
           report("[ERROR] term %s doesn't have a translation." % (term))
   
-  def main(self, record):
-    sysno = record.getXPath("//fixfield[@id='001']")[0]
-    subject = re.search("\d+$", sysno).group(0).lstrip("0")
-    subject = "http://data.techlib.cz/resource/psh/%s" % (subject)
-    self.resourceURI = rdflib.URIRef(subject)
-    self.representationURI = rdflib.URIRef(subject + ".rdf")
-
-    # Identifier
-    self.results.append((
-      self.representationURI,
-      rdflibWrapper.namespaces["dc"]["identifier"],
-      rdflib.Literal(sysno)
-    ))
+  def main(self):
+    # Write URIs & identifiers
+    self.getIdentifiers("issn")
     
     # Last modified date
-    lastModified = LastModifiedDateMapper(record, self.resourceURI, self.representationURI).mapData()
-    if lastModified:
-      self.results.append(lastModified[0])     
+    self.getLastModifiedDate()   
       
     # Sigla of the creator    
-    sigla = SiglaMapper(record, self.resourceURI, self.representationURI).mapData()
+    sigla = SiglaMapper(self.record, self.resourceURI, self.representationURI).mapData()
     if sigla:
       self.results.append(sigla[0])
     
-    marcARecord = MarcARecord(record)
+    marcARecord = MarcARecord(self.record)
     if marcARecord.isPSH():
       # Preferred label in Czech
       prefLabelCS = marcARecord.getPrefLabelCS()
@@ -342,8 +372,38 @@ class STK01Callback(Callback):
   def __init__(self, baseName="STK01"):
     Callback.__init__(self)
     
-  def main(self, record):
-    pass
+  def main(self):
+    self.getIdentifiers("bib")
+    self.getLastModifiedDate()
+    
+    # Mapping the fixfield 008
+    self.getDataFromFixfield008()
+    
+    # KPWin sysno
+    kpwSysno = self.record.getXPath('//fixfield[@id="KPW"]')
+    if not kpwSysno == []:
+      kpwSysno = kpwSysno[0]
+      self.results.append((
+        self.representationURI,
+        rdflibWrapper.namespaces["dc"]["identifier"],
+        rdflib.Literal(kpwSysno)
+      ))
+
+    # Date
+    self.getPublicationDate()
+    
+    # Publisher      
+    self.getPublisher()
+    
+    # Main title
+    mainTitle = self.record.getXPath('//varfield[@id="245"]/subfield[@label="a"]')
+    if not mainTitle == []:
+      mainTitle = mainTitle[0].strip().rstrip("/").rstrip("=").rstrip(":").rstrip(".").rstrip(";").rstrip()
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["title"],
+        rdflib.Literal(mainTitle)
+      ))
     
   def addStaticTriplesBase(self):
     triples = [(

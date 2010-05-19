@@ -176,15 +176,17 @@ class CountryMapper(Mapper):
   
   def __init__(self, doc, resourceURI, representationURI):
     Mapper.__init__(self, doc, resourceURI, representationURI)
+    self.results = []
     
   def mapData(self):    
     # Získání country codes
     countryCodes = []
 
-    extract = self.doc.getXPath("substring(//fixfield[@id='008'], 16, 3)").rstrip("-")
+    # ODLIŠIT, na koho se country codes vztahují!!!
+    extract = self.doc.getXPath("substring(//fixfield[@id='008'], 16, 3)").rstrip("-") # <self.resourceURI> dc:publisher [dbpedia:locatedIn <URI_country> . ] .
     countryCodes.append(extract)
 
-    extract = self.doc.getXPath("//fixfield[@id='044']/subfield[@label='a']")
+    extract = self.doc.getXPath("//fixfield[@id='044']/subfield[@label='a']") # <self.representationURI> dc:creator [dbpedia:locatedIn <URI_country> . ] .
     if not extract == []:
       countryCodes.append(extract[0])
 
@@ -211,8 +213,8 @@ class CountryMapper(Mapper):
       if valid:
         uri += "#location"
         validCountryCodes.append((
-          self.resourceURI,
-          rdflibWrapper.namespaces["dc"]["coverage"],
+          self.representationURI,
+          rdflibWrapper.namespaces["dbpedia"]["locatedIn"],
           rdflib.URIRef(uri)
         ))
     
@@ -220,8 +222,24 @@ class CountryMapper(Mapper):
       return validCountryCodes
     else:
       return False
+
+  def mapExtractedValues(self, predicate, code):
+    uri = validateCode(code)
+    if uri:
+      self.results.append((
+        predicate,
+        rdflib.URIRef(uri)
+      ))
     
+  def validateCode(self, code):
+    uri = "http://purl.org/NET/marccodes/countries/%s" % (validCountryCode)
+    valid = self.validateURI(uri)
+    if valid:
+      return uri
+    else:
+      return False
     
+       
 class GeographicAreaMapper(Mapper):
   """Mapování geografických oblastí na MARC Codes"""
   
@@ -428,6 +446,8 @@ class GeonamesMapper(Mapper):
     Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
+    # dc:coverage, 651, 662, 751, 752
+    # extract = self.doc.getXPath()
     pass
 
 
@@ -655,3 +675,56 @@ class LastModifiedDateMapper(Mapper):
       )]
     else:
       return False
+      
+      
+class Fixfield008Mapper(Mapper):
+  """Maps the values from the fixfield 008."""
+  
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
+    self.results = []
+    
+  def mapData(self):
+    eight_21 = []
+    eight_21.append(self.doc.getXPath("substring(//fixfield[@id='008'], 22, 1)"))
+    predicate = rdflibWrapper.namespaces["rdf"]["type"]
+    eight_21_dict = {
+      "d" : rdflibWrapper.namespaces["yago"]["Database"],
+      # "l" : "updating loose-leaf",
+      "m" : rdflibWrapper.namespaces["bibo"]["Series"],
+      "n" : rdflibWrapper.namespaces["bibo"]["Newspaper"],
+      "p" : rdflibWrapper.namespaces["bibo"]["Periodical"],
+      "w" : rdflibWrapper.namespaces["bibo"]["Website"],
+    }
+    self.mapExtractedValues(predicate, eight_21_dict, eight_21)
+    
+    eight_23 = []
+    eight_23.append(self.doc.getXPath("substring(//fixfield[@id='008'], 24, 1)"))
+    eight_23.append(self.doc.getXPath("substring(//fixfield[@id='008'], 25, 1)"))
+    predicate = rdflibWrapper.namespaces["dc"]["format"]
+    eight_23_dict = {
+      "a" : rdflibWrapper.namespaces["yago"]["Microfilm"],
+      "b" : rdflibWrapper.namespaces["yago"]["Microfiche"],
+      # "c" : "microopaque",
+      # "d" : "large print",
+      # "e" : "newspaper print",
+      "f" : rdflibWrapper.namespaces["yago"]["Braille"],
+      "s" : rdflibWrapper.namespaces["yago"]["ElectronicText"],
+    } # rdf:type dcterms:physicalMedium .
+    self.mapExtractedValues(predicate, eight_23_dict, eight_23)
+    
+    if not self.results == []:
+      return self.results
+    else:
+      return False
+    
+  def mapExtractedValues(self, predicate, valueDict, extractedValues):
+    for extractedValue in extractedValues:
+      try:
+        self.results.append((
+          self.representationURI,
+          predicate, 
+          valueDict[extractedValue]
+        ))
+      except KeyError:
+          pass

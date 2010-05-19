@@ -2,6 +2,7 @@
 #-*- coding:utf-8 -*-
 
 import math, urllib, urllib2, libxml2, time, os, sys, sqlite3, logging
+from callbacks import *
 
 failed = []
 
@@ -94,8 +95,8 @@ class Crawler(object):
     """Testing variable"""
     self.test = 0
  
-  def crawl(self, callback, sleep = 0.05):
-    """Postupně projde všechny záznamy v databázi a pro každý zavolá 'callback'"""
+  def crawl(self, callbackInstance, sleep = 0.05):
+    """Postupně projde všechny záznamy v databázi a pro každý zavolá metodu run 'callbackInstance'"""
     logging.debug("Počáteční status: %s" % (self.status))
     if self.status == False:
       try:
@@ -113,16 +114,18 @@ class Crawler(object):
       for i in baseRange:
         time.sleep(sleep) # Slušný crawler čeká sekundu mezi požadavky!
         self.status = str(i)
-        callback(self.base.getParsedRecord(i))
+        callbackInstance.run(self.base.getParsedRecord(i))
     except KeyboardInterrupt:
+        callbackInstance.commit() # Saves the crawled triples.
         self.saveStatus(i, True)        
     except:
         if self.test != i:
+          callbackInstance.commit() # Saves the crawled triples.
           self.saveStatus(i)
         time.sleep(self.sleep)
         self.sleep = self.sleep*5
         self.test = i
-        self.crawl(callback)
+        self.crawl(callbackInstance)
         
     
   def saveStatus(self, i, keyboardInterrupt = False):
