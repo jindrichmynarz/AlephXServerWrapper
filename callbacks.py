@@ -95,6 +95,25 @@ class Callback():
         rdflib.Literal(placeOfPublication)
       )])
       # Namapovat vydavatele? PublisherMapper
+      
+  def getUDC(self):
+    udc = self.record.getXPath('//varfield[@id="080"]/subfield[@label="a"]')
+    if not udc == []:
+      udc = udc[0].strip()
+      bnodeID = rdflib.BNode()
+      self.addTriples([(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["subject"],
+        bnodeID
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["rdf"]["value"],
+        rdflib.Literal(udc)
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["dcam"]["memberOf"],
+        rdflibWrapper.namespaces["dcterms"]["UDC"]
+      )])
         
   def main(self):
     """Main data extraction. Must be overwritten by a child class."""
@@ -176,23 +195,7 @@ class STK02Callback(Callback):
       ))
     
     # Universal Decimal Classification
-    udc = self.record.getXPath('//varfield[@id="080"]/subfield[@label="a"]')
-    if not udc == []:
-      udc = udc[0]
-      bnodeID = rdflib.BNode()
-      self.addTriples([(
-        self.resourceURI,
-        rdflibWrapper.namespaces["dc"]["subject"],
-        bnodeID
-      ), (
-        bnodeID,
-        rdflibWrapper.namespaces["rdf"]["value"],
-        rdflib.Literal(udc)
-      ), (
-        bnodeID,
-        rdflibWrapper.namespaces["dcam"]["memberOf"],
-        rdflibWrapper.namespaces["dcterms"]["UDC"]
-      )])
+    self.getUDC()
     
     # Publisher      
     self.getPublisher()
@@ -393,18 +396,190 @@ class STK01Callback(Callback):
     self.getPublicationDate()
     
     # Publisher      
-    self.getPublisher()
-    
+    self.getPublisher()    
+      
     # Main title
     mainTitle = self.record.getXPath('//varfield[@id="245"]/subfield[@label="a"]')
     if not mainTitle == []:
-      mainTitle = mainTitle[0].strip().rstrip("/").rstrip("=").rstrip(":").rstrip(".").rstrip(";").rstrip()
+      mainTitle = mainTitle[0].strip().rstrip("/").rstrip("=").rstrip(":").rstrip(".").rstrip(";").rstrip() # A few attemps to clean dirty data
       self.results.append((
         self.resourceURI,
         rdflibWrapper.namespaces["dc"]["title"],
         rdflib.Literal(mainTitle)
       ))
+      
+    # Main author entry
+    mainAuthor = self.record.getXPath('//varfield[@id="100"][@i1="1"]/subfield[@label="a"]')
+    if not mainAuthor == []:
+      mainAuthor = mainAuthor[0].strip().rstrip(",")
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["creator"],
+        rdflib.Literal(mainAuthor)
+      ))
     
+    # VIAF main author mapper
+    viafAuthor = AuthorMapper(self.record, self.resourceURI, self.representationURI).mapData("main")
+    if viafAuthor:
+      self.results.append(viafAuthor[0])
+      
+    # Universal Decimal Classification
+    self.getUDC()
+    
+    # Number of pages
+    physicalDescription = self.record.getXPath('//varfield[@id="300"]/subfield[@label="a"]')
+    if not physicalDescription == []:
+      physicalDescription = physicalDescription[0]
+      noPages = re.search("(\d+)(?=\ss.)", physicalDescription) # An empty attempt to parse evil physical description string
+      if noPages:
+        noPages = int(noPages.group(1))
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["bibo"]["numPages"],
+          rdflib.Literal(noPages)
+        ))
+        
+    # ISBN
+    isbn = self.record.getXPath('//varfield[@id="020"]/subfield[@label="a"]')
+    if not isbn == []:
+      isbn = isbn[0]
+      isbn = re.search("([\dX-]+)(?=\s?)", isbn)
+      if isbn:
+        isbn = isbn.group(1).strip()
+        predicateDict = {
+          10 : rdflibWrapper.namespace["bibo"]["isbn10"],
+          13 : rdflibWrapper.namespace["bibo"]["isbn13"]
+        }
+        isbnLength = isbn.strip("-")
+        try:
+          predicate = predicateDict[isbnLength]
+        except KeyError:
+          predicate = rdflibWrapper.namespaces["bibo"]["isbn"]
+          
+        self.results.append((
+          self.resourceURI,
+          predicate,
+          rdflib.Literal(isbn)
+        ))      
+    
+    # Document form
+    fmt = self.record.getXPath('//fixfield[@id="FMT"]')
+    if not fmt == []:
+      fmt = fmt[0]
+      fmtDict = {
+        "BK" : rdflibWrapper.namespace["bibo"]["Book"],
+        "DS" : rdflibWrapper.namespace["bibo"]["Thesis"],
+        # "ER" : "elektronic resource",
+        "HF" : rdflibWrapper.namespace["yago"]["HistoricalDocument"],
+        "RS" : rdflibWrapper.namespace["bibo"]["Article"],
+        "SE" : rdflibWrapper.namespace["bibo"]["Journal"],
+      }
+      try:
+        documentForm = fmtDict[fmt]
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespace["rdf"]["type"],
+          documentForm
+        ))
+      except KeyError:
+        # FMT string not found
+        
+    # Call number
+    callNumber = self.record.getXPath('//varfield[@id="990"]/subfield[@label="g"]')
+    if not callNumber == []:
+      callNumber = callNumber[0].strip()
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["bibo"]["locator"],
+        rdflib.Literal(callNumber)
+      ))
+      
+    # Edition statement
+    editionStatement = self.record.getXPath('//varfield[@id="250"]/subfield[@label="a"]')
+    if not editionStatement == []:
+      editionStatement = editionStatement[0].strip()
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["dbpedia"]["numberEdition"]
+        rdflib.Literal(editionStatement)
+      ))
+      
+    # Note
+    note = self.record.getXPath('//varfield[@id="500"]/subfield[@label="a"]')
+    if not note == []:
+      note = note[0].strip()
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespace["dc"]["description"],
+        rdflib.Literal(note, lang="cs")
+      ))
+      
+    # Added name entry
+    addedNameEntries = self.record.getXPath('//varfield[@id="700"][@i1="1"]/subfield[@label="a"]')
+    if not addedNameEntries == []:
+      for addedNameEntry in addedNameEntries:
+        addedNameEntry = addedNameEntry[0].strip().rstrip(",")
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["dc"]["contributor"],
+          rdflib.Literal(addedNameEntry)
+        ))
+    
+    # VIAF added author mapper
+    viafAuthor = AuthorMapper(self.record, self.resourceURI, self.representationURI).mapData("added")
+    if viafAuthor:
+      self.addTriples(viafAuthor)
+      
+    # Library of Congress Classification
+    lccs = self.record.getXPath('//varfield[@id="LCC"]/subfield[@label="a"] | //varfield[@id="050"]/subfield[@label="a"]')
+    if not lccs == []:
+      for lcc in lccs:
+        bnodeID = rdflib.BNode()
+        lcc = lcc.strip()
+        self.addTriples([(
+          self.resourceURI,
+          rdflibWrapper.namespaces["dc"]["subject"],
+          bnodeID
+        ), (
+          bnodeID,
+          rdflibWrapper.namespaces["rdf"]["value"],
+          rdflib.Literal(lcc)
+        ), (
+          bnodeID,
+          rdflibWrapper.namespaces["dcam"]["memberOf"],
+          rdflibWrapper.namespaces["dcterms"]["LCC"]
+        )])
+    
+    # Bibliography note
+    bibliographyNote = self.record.getXPath('//varfield[@id="504"]/subfield[@label="a"]')
+    if not bibliographyNote == []:
+      bnodeID = rdflib.BNode()
+      bibliographyNote = bibliographyNote[0].strip()
+      self.addTriples([(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["description"],
+        bnodeID
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["rdf"]["type"],
+        rdflibWrapper.namespaces["yago"]["Bibliography"]
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["rdf"]["value"],
+        rdflib.Literal(bibliographyNote, lang="cs")
+      )])
+      
+    # Edition
+    editions = self.record.getXPath('//varfield[@id="490"]/subfield[@label="a"]')
+    if not editions == []:
+      for edition in editions:
+        edition = edition.strip()
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["bibo"]["edition"],
+          rdflib.Literal(edition)
+        ))
+        
   def addStaticTriplesBase(self):
     triples = [(
       self.representationURI,

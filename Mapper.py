@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
-import urllib, urllib2, libxml2, re, time, string, rdflib
+import urllib, urllib2, libxml2, re, time, string, rdflib, unicodedata
 from alephXServerWrapper import *
 import rdflibWrapper
 
@@ -48,6 +48,12 @@ class Mapper():
       return doc
     else:
       return False
+      
+  def stripAccents(self, string):
+    """
+      <http://stackoverflow.com/questions/517923/what-is-the-best-way-to-remove-accents-in-a-python-unicode-string>
+    """
+    return ''.join((c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn'))
 
 class DCTypeMapper(Mapper):
   """Mapování typu dokumentu na DCMI Types, resp. typy z dalších ontologií (BIBO, YAGO)."""
@@ -278,58 +284,68 @@ class PSHMapper(Mapper):
         
       
 class AuthorMapper(Mapper):
-  """Mapování jmen autorů z bibliografických záznamů na záznamy autoritní"""
+  """Mapování jmen autorů z bibliografických záznamů na záznamy autoritní na VIAF.org"""
   
   def __init__(self, doc, resourceURI, representationURI):
     Mapper.__init__(self, doc, resourceURI, representationURI)
     
-  def mapData(self):
-    author = self.doc.getXPath("//varfield[@id='100']/subfield[@label='a']")
-    if not author == []:
-      author = author[0]
-      # Dodělat: RDFLib dotaz na STK11
-    
-
-class VIAFMapper(Mapper):
-  """Mapování ze jmenných autoritních záznamů na VIAF."""
-  
-  def __init__(self, doc, resourceURI, representationURI):
-    Mapper.__init__(self, doc, resourceURI, representationURI)
-    
-  def mapData(self):
-    fmt = self.doc.getXPath("//fixfield[@id='FMT']")[0]
-    if fmt == "JA": # Pokud jde o jmennou autoritu
-      authorName = self.doc.getXPath("//varfield[@id='100']/subfield[@label='a']")
-      authorCode = self.doc.getXPath("//varfield[@id='100']/subfield[@label='7']")
-      if (not authorName == []) and (not authorCode == []):
-        authorName = authorName[0]
-        authorCode = authorCode[0]
-        
-        headers = {"Accept" : "application/rdf+xml"}
-        url = """http://viaf.org/search?query=local.mainHeadingEl+=+%22""" + authorCode + """%22&version=1.1&operation=searchRetrieve"""
-        
-        req = urllib2.Request(url, None, headers)
-        doc = self.getParsedDoc(req)
-        docContext = doc.xpathNewContext()
-        docContext.xpathRegisterNs("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-        docContext.xpathRegisterNs("skos", "http://www.w3.org/2004/02/skos/core#")
-        docContext.xpathRegisterNs("foaf", "http://xmlns.com/foaf/0.1/")
-        
-        foafName = docContext.xpathEval("//foaf:name")
-        foafName = foafName[0].content
-        
-        # Kontrola podle jména autora
-        if foafName in authorName or authorName in foafName:
-          conceptId = docContext.xpathEval("//skos:Concept/@rdf:about")
-          match = re.match(".*(?=\.)", conceptId[0].content) # Odstraní příponu typu souboru
-          conceptId = match.group()
-          conceptURI = "http://viaf.org/" + conceptId
-          
-          return [(
-            self.resourceURI,
-            rdflibWrapper.namespaces["owl"]["sameAs"],
-            rdflib.URIRef(conceptURI)
-          )]
+  def mapData(self, authorType):
+    # authorType = {"main" | "added"}
+    if authorType == "main":
+      xpath = "//varfield[@id='100']/subfield[@label='a']"
+      predicate = rdflibWrapper.namespaces["dc"]["creator"]
+    elif author == "added":
+      xpath = "//varfield[@id='700']/subfield[@label='a']"
+      predicate = rdflibWrapper.namespaces["dc"]["contributor"]
+    else:
+      raise ValueError("AuthorMapper.mapData: not acceptable authorType argument.")
+      
+    authors = self.doc.getXPath(xpath)
+    if not authors == []:
+      for author in authors:
+        author = author.strip().rstrip(",").strip()
+        author = "\"%s\"" % (urllib.quote(author))
+        searchResults = self.searchAlephBase("http://aleph.techlib.cz", "STK11", "WAU", request)
+        if searchResults:
+          authorName = searchResults.getXPath("present/record/metadata/oai_marc[fixfield[@id='FMT']='JA']/varfield[@id='100']/subfield[@label='a']")
+          authorCode = searchResults.getXPath("present/record/metadata/oai_marc[fixfield[@id='FMT']='JA']/varfield[@id='100']/subfield[@label='9']")
+          if (not authorName == []) and (not authorCode == []):
+            authorName = self.stripAccents(authorName[0]).strip().rstrip(",").strip()
+            authorCode = authorCode[0].strip()
+            
+            headers = {"Accept" : "application/rdf+xml"}
+            url = """http://viaf.org/search?query=local.mainHeadingEl+=+%22""" + authorCode + """%22&version=1.1&operation=searchRetrieve"""
+            
+            req = urllib2.Request(url, None, headers)
+            doc = self.getParsedDoc(req)
+            docContext = doc.xpathNewContext()
+            docContext.xpathRegisterNs("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#")
+            docContext.xpathRegisterNs("skos", "http://www.w3.org/2004/02/skos/core#")
+            docContext.xpathRegisterNs("foaf", "http://xmlns.com/foaf/0.1/")
+            
+            foafName = docContext.xpathEval("//foaf:name")
+            foafName = self.stripAccents(foafName[0].content)
+            
+            # Kontrola podle jména autora
+            if foafName in authorName or authorName in foafName:
+              conceptId = docContext.xpathEval("//skos:Concept/@rdf:about")
+              match = re.match(".*(?=\.)", conceptId[0].content) # Odstraní příponu typu souboru
+              conceptId = match.group()
+              conceptURI = "http://viaf.org/" + conceptId
+              
+              return [(
+                self.resourceURI,
+                predicate,
+                rdflib.URIRef(conceptURI)
+              )]
+            else:
+              return False
+          else:
+            return False
+        else:
+          return False
+    else:
+      return False
 
 
 class DBPediaMapper(Mapper):
@@ -476,10 +492,9 @@ class PublisherMapper(Mapper):
   def searchPublisher(self, publisher):
     doc = self.searchAlephBase("http://sigma.nkp.cz", "NAK", "WNA", publisher)
     if doc:
-      url = "http://sigma.nkp.cz/X?op=present&base=NAK&set_entry=1-%s&set_number=%s" % (noRecords.lstrip("0"), setNumber)
-      doc = self.getParsedDoc(url)
       xpath = "present/record/doc_number[metadata/oai_marc/varfield[@id='NAK'][normalize-space(child::text())='%s']]" % (publisher) # kontrola, zdali v poli NAK je hledaný nakladatel
-      # DODĚLAT!
+      publisher = doc.getXPath(xpath)
+      # Dodělat!
     else:
       return False
 
@@ -728,3 +743,22 @@ class Fixfield008Mapper(Mapper):
         ))
       except KeyError:
           pass
+          
+          
+class Varfield245SubfieldBMapper(Mapper):
+  """
+    Maps values from subfield $b in field 245.
+  """
+  
+  def __init__(self, doc, resourceURI, representationURI):
+    Mapper.__init__(self, doc, resourceURI, representationURI)
+    self.results = []
+    
+  def mapData(self):
+    extractedValue = self.doc.getXPath('//varfield[@id="245"]/subfield[@label="b"]')
+    if not extractedValue == []:
+      extractedValue = extractedValue[0]
+      pass # To implement!
+    else:
+      return False
+
