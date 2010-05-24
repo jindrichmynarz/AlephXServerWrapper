@@ -10,6 +10,7 @@ validLanguagesGlobal = {
   "marccodes" : [],
   "lexvo" : []
 }
+siglaCache = {}
 
 class Mapper():
   """Obecná třída pro mapování hodnot."""
@@ -331,6 +332,7 @@ class AuthorMapper(Mapper):
   """Mapování jmen autorů z bibliografických záznamů na záznamy autoritní na VIAF.org"""
   
   def __init__(self, doc, resourceURI, representationURI):
+    report("INFO: initializing AuthorMapper")
     Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self, authorType):
@@ -339,7 +341,7 @@ class AuthorMapper(Mapper):
       authorXpath = "//varfield[@id='100']/subfield[@label='a']"
       relatorXpath = "//varfield[@id='100']/subfield[@label='4']"
       predicate = rdflibWrapper.namespaces["dc"]["creator"]
-    elif author == "added":
+    elif authorType == "added":
       authorXpath = "//varfield[@id='700']/subfield[@label='a']"
       relatorXpath = "//varfield[@id='700']/subfield[@label='4']"
       predicate = rdflibWrapper.namespaces["dc"]["contributor"]
@@ -351,8 +353,9 @@ class AuthorMapper(Mapper):
     if not authors == []:
       for author in authors:
         author = author.strip().rstrip(",").strip()
-        author = "\"%s\"" % (urllib.quote(author))
-        searchResults = self.searchAlephBase("http://aleph.techlib.cz", "STK11", "WAU", request)
+        report("INFO: stripped author %s" % (author))
+        author = "\"%s\"" % (author)
+        searchResults = self.searchAlephBase("http://aleph.techlib.cz", "STK11", "WAU", author)
         if searchResults:
           authorName = searchResults.getXPath("present/record/metadata/oai_marc[fixfield[@id='FMT']='JA']/varfield[@id='100']/subfield[@label='a']")
           authorCode = searchResults.getXPath("present/record/metadata/oai_marc[fixfield[@id='FMT']='JA']/varfield[@id='100']/subfield[@label='9']")
@@ -553,28 +556,30 @@ class SiglaMapper(Mapper):
   
   def mapData(self):
     # pracujeme s: http://sigma.nkp.cz/F/?func=file&file_name=find-b&local_base=ADR
+    report("INFO: SiglaMapper.mapData")
+    siglaURI = False
     sigla = self.doc.getXPath("//varfield[@id='040']/subfield[@label='a']")
     if not sigla == []:
       sigla = sigla[0]
-      doc = self.searchAlephBase("http://sigma.nkp.cz", "ADR", "SIG", sigla)
-      if doc:
-        xpath = "present/record/doc_number[metadata/oai_marc/varfield[@id='SGL']/subfield[@label='a']/text()='%s']" % (sigla)
-        docNum = doc.getXPath(xpath)
-        if not docNum == []:
-          docNum = docNum[0].lstrip("0")
-          uri = "http://sigma.nkp.cz/X?op=doc-num&base=ADR&doc-num=" + docNum
-          return [(
-            self.representationURI,
-            rdflibWrapper.namespaces["dc"]["creator"], 
-            rdflib.URIRef(uri)
-          )]
-        else:
-          return False
+      # Check whether the sigla is already cached.
+      if sigla in siglaCache.keys():
+        siglaURI = siglaCache[sigla]
       else:
-        return False
+        doc = self.searchAlephBase("http://sigma.nkp.cz", "ADR", "SIG", sigla)
+        if doc:
+          xpath = "present/record/doc_number[metadata/oai_marc/varfield[@id='SGL']/subfield[@label='a']/text()='%s']" % (sigla)
+          docNum = doc.getXPath(xpath)
+          if not docNum == []:
+            docNum = docNum[0].lstrip("0")
+            siglaURI = "http://sigma.nkp.cz/X?op=doc-num&base=ADR&doc-num=" + docNum
+    if siglaURI:
+      return [(
+        self.representationURI,
+        rdflibWrapper.namespaces["dc"]["creator"], 
+        rdflib.URIRef(siglaURI)
+      )]
     else:
-      return False
-    
+      return False    
     
 class PSHQualifierMapper(Mapper):
   

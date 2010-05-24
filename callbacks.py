@@ -88,11 +88,13 @@ class Callback():
       # Vyčistit a dodělat rozmezí dat!
   
   def getPublisher(self):
+    report("INFO: getting publisher")
     publishers = self.record.getXPath('//varfield[@id="260"]/subfield[@label="b"] | //varfield[@id="720"][@i1="2"]/subfield[@label="a"]')
     if not publishers == []:
       for publisher in publishers:
+        report("INFO: publisher %s" % (publisher))
         publisher = publisher.strip().rstrip(",").rstrip(";").rstrip(":").rstrip()
-        bnodeID = rdflib.BNode()
+        report("INFO: stripped publisher %s" % (publisher))
         self.addTriples([(
           self.resourceURI, 
           rdflibWrapper.namespaces["dc"]["publisher"],
@@ -101,6 +103,7 @@ class Callback():
     placeOfPublication = self.record.getXPath('//varfield[@id="260"]/subfield[@label="a"]')
     if not placeOfPublication == []:
       placeOfPublication = placeOfPublication[0].strip(":").strip(";").strip()
+      bnodeID = rdflib.BNode()
       self.addTriples([(
         self.resourceURI, 
         rdflibWrapper.namespaces["dc"]["publisher"],
@@ -398,13 +401,16 @@ class STK01Callback(Callback):
     Callback.__init__(self, baseName)
     
   def main(self):
+    report("INFO: beginning STK01 callback")
     self.getIdentifiers("bib")
     self.getLastModifiedDate()
     
     # Mapping the fixfield 008
+    report("INFO: STK01 mapping the fixfield 008")
     self.getDataFromFixfield008()
     
     # KPWin sysno
+    report("INFO: STK01 getting KPWin sysno")
     kpwSysno = self.record.getXPath('//fixfield[@id="KPW"]')
     if not kpwSysno == []:
       kpwSysno = kpwSysno[0]
@@ -415,12 +421,15 @@ class STK01Callback(Callback):
       ))
 
     # Date
+    report("INFO: STK01 getting publication date")
     self.getPublicationDate()
     
-    # Publisher      
+    # Publisher
+    report("INFO: STK01 getting publisher")
     self.getPublisher()    
       
     # Main title
+    report("INFO: STK01 getting main title")
     mainTitle = self.record.getXPath('//varfield[@id="245"]/subfield[@label="a"]')
     if not mainTitle == []:
       mainTitle = mainTitle[0].strip().rstrip("/").rstrip("=").rstrip(":").rstrip(".").rstrip(";").rstrip() # A few attemps to clean dirty data
@@ -431,6 +440,7 @@ class STK01Callback(Callback):
       ))
       
     # Main author entry
+    report("INFO: STK01 getting main author entry")
     mainAuthor = self.record.getXPath('//varfield[@id="100"][@i1="1"]/subfield[@label="a"]')
     if not mainAuthor == []:
       mainAuthor = mainAuthor[0].strip().rstrip(",")
@@ -441,14 +451,17 @@ class STK01Callback(Callback):
       ))
     
     # VIAF main author mapper
+    report("INFO: STK01 beginning VIAF author mapper")
     viafAuthor = AuthorMapper(self.record, self.resourceURI, self.representationURI).mapData("main")
     if viafAuthor:
       self.results.append(viafAuthor[0])
       
     # Universal Decimal Classification
+    report("INFO: STK01 getting UDC")
     self.getUDC()
     
     # Number of pages
+    report("INFO: STK01 getting number of pages")
     physicalDescription = self.record.getXPath('//varfield[@id="300"]/subfield[@label="a"]')
     if not physicalDescription == []:
       physicalDescription = physicalDescription[0]
@@ -462,17 +475,20 @@ class STK01Callback(Callback):
         ))
         
     # ISBN
+    report("INFO: STK01 getting ISBN")
     isbn = self.record.getXPath('//varfield[@id="020"]/subfield[@label="a"]')
     if not isbn == []:
       isbn = isbn[0]
+      report("INFO: found ISBN %s" % (isbn))
       isbn = re.search("([\dX-]+)(?=\s?)", isbn)
       if isbn:
         isbn = isbn.group(1).strip()
+        report("INFO: stripped ISBN %s" % (isbn))
         predicateDict = {
-          10 : rdflibWrapper.namespace["bibo"]["isbn10"],
-          13 : rdflibWrapper.namespace["bibo"]["isbn13"]
+          10 : rdflibWrapper.namespaces["bibo"]["isbn10"],
+          13 : rdflibWrapper.namespaces["bibo"]["isbn13"]
         }
-        isbnLength = isbn.strip("-")
+        isbnLength = len(isbn.strip("-"))
         try:
           predicate = predicateDict[isbnLength]
         except KeyError:
@@ -485,22 +501,23 @@ class STK01Callback(Callback):
         ))      
     
     # Document form
+    report("INFO: STK01 getting document form")
     fmt = self.record.getXPath('//fixfield[@id="FMT"]')
     if not fmt == []:
       fmt = fmt[0]
       fmtDict = {
-        "BK" : rdflibWrapper.namespace["bibo"]["Book"],
-        "DS" : rdflibWrapper.namespace["bibo"]["Thesis"],
+        "BK" : rdflibWrapper.namespaces["bibo"]["Book"],
+        "DS" : rdflibWrapper.namespaces["bibo"]["Thesis"],
         # "ER" : "elektronic resource",
-        "HF" : rdflibWrapper.namespace["yago"]["HistoricalDocument"],
-        "RS" : rdflibWrapper.namespace["bibo"]["Article"],
-        "SE" : rdflibWrapper.namespace["bibo"]["Journal"],
+        "HF" : rdflibWrapper.namespaces["yago"]["HistoricalDocument"],
+        "RS" : rdflibWrapper.namespaces["bibo"]["Article"],
+        "SE" : rdflibWrapper.namespaces["bibo"]["Journal"],
       }
       try:
         documentForm = fmtDict[fmt]
         self.results.append((
           self.resourceURI,
-          rdflibWrapper.namespace["rdf"]["type"],
+          rdflibWrapper.namespaces["rdf"]["type"],
           documentForm
         ))
       except KeyError:
@@ -508,6 +525,7 @@ class STK01Callback(Callback):
         report("FMT string not found")
       
     # Call number
+    report("INFO: STK01 getting call number")
     callNumber = self.record.getXPath('//varfield[@id="990"]/subfield[@label="g"]')
     if not callNumber == []:
       callNumber = callNumber[0].strip()
@@ -518,6 +536,7 @@ class STK01Callback(Callback):
       ))
       
     # Edition statement
+    report("INFO: STK01 getting edition statement")
     editionStatement = self.record.getXPath('//varfield[@id="250"]/subfield[@label="a"]')
     if not editionStatement == []:
       editionStatement = editionStatement[0].strip()
@@ -528,21 +547,24 @@ class STK01Callback(Callback):
       ))
       
     # Note
-    notes = self.record.getXPath('//varfield[@id="500"]/subfield[@label="a"] | //varfield[@id="502"]/subfield[@label="a"]')
+    report("INFO: STK01 getting note")
+    notes = self.record.getXPath('//varfield[@id="500" or @id="502"]/subfield[@label="a"]')
     if not notes == []:
       for note in notes:
         note = note.strip()
         self.results.append((
           self.resourceURI,
-          rdflibWrapper.namespace["dc"]["description"],
+          rdflibWrapper.namespaces["dc"]["description"],
           rdflib.Literal(note, lang="cs")
         ))
       
     # Added name entry
+    report("INFO: STK01 getting added name entry")
     addedNameEntries = self.record.getXPath('//varfield[@id="700"][@i1="1"]/subfield[@label="a"]')
     if not addedNameEntries == []:
       for addedNameEntry in addedNameEntries:
-        addedNameEntry = addedNameEntry[0].strip().rstrip(",")
+        addedNameEntry = addedNameEntry.strip().rstrip(",")
+        report("INFO: STK01 got added name entry %s" % (addedNameEntry))
         self.results.append((
           self.resourceURI,
           rdflibWrapper.namespaces["dc"]["contributor"],
@@ -550,11 +572,13 @@ class STK01Callback(Callback):
         ))
     
     # VIAF added author mapper
+    report("INFO: STK01 getting VIAF for added author entry")
     viafAuthor = AuthorMapper(self.record, self.resourceURI, self.representationURI).mapData("added")
     if viafAuthor:
       self.addTriples(viafAuthor)
       
     # Library of Congress Classification
+    report("INFO: STK01 getting LCC")
     lccs = self.record.getXPath('//varfield[@id="LCC"]/subfield[@label="a"] | //varfield[@id="050"]/subfield[@label="a"]')
     if not lccs == []:
       for lcc in lccs:
@@ -575,6 +599,7 @@ class STK01Callback(Callback):
         )])
     
     # Bibliography note
+    report("INFO: STK01 getting bibliography note")
     bibliographyNote = self.record.getXPath('//varfield[@id="504"]/subfield[@label="a"]')
     if not bibliographyNote == []:
       bnodeID = rdflib.BNode()
@@ -594,6 +619,7 @@ class STK01Callback(Callback):
       )])
       
     # Edition
+    report("INFO: STK01 getting edition")
     editions = self.record.getXPath('//varfield[@id="490"]/subfield[@label="a"]')
     if not editions == []:
       for edition in editions:
@@ -605,6 +631,7 @@ class STK01Callback(Callback):
         ))
     
     # Contributors
+    report("INFO: STK01 getting contributors")
     contributors = self.record.getXPath('//varfield[@id="245"]/subfield[@label="c"]')
     if not contributors == []:
      contributors = contributors[0].strip().strip("by").strip().rstrip(".").replace("  ", " ").split(", ") # Vain attempt to clean the data.
@@ -616,21 +643,29 @@ class STK01Callback(Callback):
        ))
       
     # Alternate title
+    report("INFO: STK01 getting alternate title")
     alternateTitle = self.record.getXPath('//varfield[@id="246"][@i1="3"][@i2="0"]/subfield[@label="a"]')
     if not alternateTitle == []:
       alternateTitle = alternateTitle[0].strip()
       self.results.append((
         self.resourceURI,
-        rdflibWrapper.namespace["dbpedia"]["alternateTitle"],
+        rdflibWrapper.namespaces["dbpedia"]["alternateTitle"],
         rdflib.Literal(alternateTitle)
       ))
     
     # PSH subject term
+    report("INFO: STK01 getting PSH subject terms")
     pshTerms = self.record.getXPath('//varfield[@id="650"][@i1="0"][@i2="7"]/subfield[@label="a"]')
     if not pshTerms == []:
       for pshTerm in pshTerms:
         pshTerm = pshTerm.strip()
-        pshURI = self.pshTranslateTable[pshTerm]
+        report("INFO: got PSH %s" % (pshTerm))
+        try:
+          pshURI = self.pshTranslateDict[pshTerm]
+        except KeyError:
+          report("ERROR: cannot find the translation for PSH %s" % (pshTerm))
+          raise SystemExit
+          
         self.results.append((
           self.resourceURI,
           rdflibWrapper.namespaces["dc"]["subject"],
@@ -638,6 +673,7 @@ class STK01Callback(Callback):
         ))
     
     # Sequence number in edition
+    report("INFO: STK01 getting sequence number in edition")
     editionNumber = self.record.getXPath('//varfield[@id="490"]/subfield[@label="v"]')
     if not editionNumber == []:
       editionNumber = editionNumber[0].strip()
@@ -648,6 +684,7 @@ class STK01Callback(Callback):
       ))
     
     # Added entry - corporation
+    report("INFO: STK01 getting added entry for corporation")
     corporationAddedEntry = self.record.getXPath('//varfield[@id="710"]/subfield[@label="a"]')
     if not corporationAddedEntry == []:
       corporationAddedEntry = corporationAddedEntry[0].strip()
