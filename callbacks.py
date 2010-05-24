@@ -5,12 +5,9 @@ from alephXServerWrapper import *
 from Mapper import *
 import rdflib
 import rdflibWrapper
+from report import report
 
-def report(message):
-  """Helper debugging function"""
-  print message
-  # Potenciálně zapisování do logu pomocí package logging
-  
+
 class Callback():
   
   def __init__(self, baseName):
@@ -19,9 +16,21 @@ class Callback():
     self.baseName = baseName
     self.resourceURI = "" # URI for the resource
     self.representationURI = "" # URI for the representation
+    self.pshTranslateDict = {} # Dict for translating PSH preferred labels to IDs
+    
+    # PSH translate table
+    report("INFO: Initializing PSH translate table.")
+    file = open("pshTranslateTable.csv", "r")
+    pshTranslateTable = file.read()
+    file.close()
+    pshTranslateTable = pshTranslateTable.split("\n")
+    for pshTranslateLine in pshTranslateTable:
+      line = pshTranslateLine.split(";")
+      self.pshTranslateDict[line[0]] = line[1]
     
   def commitData(self):
     """Saves self.results into RDFLib."""
+    report("INFO: commiting data.")
     rdflibWrapper.commitData(self.results)
     self.results = []
     
@@ -34,9 +43,12 @@ class Callback():
     file.close()
   
   def getIdentifiers(self, uriBase):
+    report("INFO: getting identifiers for %s" % (uriBase))
     sysno = self.record.getXPath("//fixfield[@id='001']")[0]
+    report("INFO: got sysno %s" % (sysno))
     subject = re.search("\d+$", sysno).group(0).lstrip("0")
     subject = "http://data.techlib.cz/resource/%s/%s" % (uriBase, subject)
+    report("INFO: got subject URI %s" % (subject))
     self.resourceURI = rdflib.URIRef(subject)
     self.representationURI = rdflib.URIRef(subject + ".rdf")
     self.results.append((
@@ -53,7 +65,11 @@ class Callback():
   
   def getDataFromFixfield008(self):
     """Extract and map the data from fixfield 008"""
-    fixfield008Results = Fixfield008Mapper(self.record, self.resourceURI, self.representationURI).mapData()
+    report("INFO: getDataFromFixfield008 method")
+    report("INFO: \n\t resource URI %s,\n\t representation URI %s,\n\t record %s" % (self.resourceURI, self.representationURI, self.record))
+    mapper = Fixfield008Mapper(self.record, self.resourceURI, self.representationURI)
+    report("INFO: Fixfield008Mapper.mapData()")
+    fixfield008Results = mapper.mapData()
     if fixfield008Results:
       self.addTriples(fixfield008Results)
 
@@ -100,6 +116,7 @@ class Callback():
     udc = self.record.getXPath('//varfield[@id="080"]/subfield[@label="a"]')
     if not udc == []:
       udc = udc[0].strip()
+      report("INFO: UDC %s" % (udc))
       bnodeID = rdflib.BNode()
       self.addTriples([(
         self.resourceURI,
@@ -159,35 +176,47 @@ class Callback():
     
   def run(self, record):
     """Runs the callback."""
+    report("INFO: running the callback")
     self.record = record
+    report("INFO: callback main extraction")
     self.main()
-    self.addStaticTriplesGlobal()
+    # report("INFO: callback adding global static triples")
+    # self.addStaticTriplesGlobal()
+    report("INFO: callback adding base static triples")
     self.addStaticTriplesBase()
-    self.commitData()
-    self.writeUnmapped()
+    # report("INFO: callback writing unmapped")
+    # self.writeUnmapped()
     if len(self.results) > 1000:
-      self.commit()
+      report("INFO: callback flushing the cache")
+      self.commitData()
   
   
 class STK02Callback(Callback):
   
   def __init__(self, baseName="STK02"):
-    Callback.__init__(self)
+    Callback.__init__(self, baseName)
     
   def main(self):
+    report("INFO: STK02 callback main method.")
+    
     # Write URIs & identifiers
+    report("INFO: STK02 getting identifiers")
     self.getIdentifiers("issn")
     
     # Mapping the fixfield 008
+    report("INFO: STK02 mapping the fixfield 008")
     self.getDataFromFixfield008()
       
     # Last modified date
+    report("INFO: STK02 getting the last modified date")
     self.getLastModifiedDate()   
     
     # Short title
+    report("INFO: STK02 getting the short title")
     shortTitle = self.record.getXPath('//varfield[@id="210"][@i1="1"]/subfield[@label="a"]')
     if not shortTitle == []:
       shortTitle = shortTitle[0]
+      report("INFO: short title is %s" % (shortTitle))
       self.results.append((
         self.resourceURI, 
         rdflibWrapper.namespaces["bibo"]["shortTitle"],
@@ -195,12 +224,15 @@ class STK02Callback(Callback):
       ))
     
     # Universal Decimal Classification
+    report("INFO: STK02 getting the UDC")
     self.getUDC()
     
-    # Publisher      
+    # Publisher
+    report("INFO: STK02 getting the publisher")    
     self.getPublisher()
 
     # Place of publication
+    report("INFO: STK02 getting the place of publication")
     publicationPlace = self.record.getXPath('//varfield[@id="260"]/subfield[@label="a"]')
     if not publicationPlace == []:
       publicationPlace = publicationPlace[0]
@@ -210,6 +242,7 @@ class STK02Callback(Callback):
       # self.results.append((self.resourceURI, "", publicationPlace))
       
     # ISSN
+    report("INFO: STK02 getting the ISSNs")
     issns = self.record.getXPath('//varfield[@id="022"]/subfield[@label="a" or @label="l"]')
     if not issns == []:
       # Počítá s tím, že nakonec proběhne deduplikace triplů.
@@ -221,42 +254,40 @@ class STK02Callback(Callback):
         ))
 
     # Date
+    report("INFO: STK02 getting the date")
     self.getPublicationDate()
     
     # Titles
-    titles = record.getXPath('//varfield[@id="222"][@i2="0"]/subfield[@label="a"] | //varfield[@id="245"][@i1="1"]/subfield[@label="a"] | //varfield[@id="246"]/subfield[@label="a"]')
+    report("INFO: STK02 getting the titles")
+    titles = self.record.getXPath('//varfield[@id="222"][@i2="0"]/subfield[@label="a"] | //varfield[@id="245"][@i1="1"]/subfield[@label="a"] | //varfield[@id="246"]/subfield[@label="a"]')
     if not titles == []:
       for title in titles:
+        title = title.strip().rstrip(".")
+        report("INFO: title %s" % (title))
         self.results.append((
           self.resourceURI,
           rdflibWrapper.namespaces["dc"]["title"],
           rdflib.Literal(title)
         ))
-    
-    # Short title
-    shortTitle = self.record.getXPath('//varfield[@id="210"][@i1="1"][@i2=" "]/subfield[@label="b"]')
-    if not shortTitle == []:
-      shortTitle = shortTitle[0]
-      self.results.append((
-        self.resourceURI,
-        rdflibWrapper.namespaces["bibo"]["shortTitle"],
-        rdflib.Literal(shortTitle)
-      ))
       
     # Language
+    report("INFO: STK02 getting the language")
     languages = LanguageMapper(self.record, self.resourceURI, self.representationURI).mapData()
     if languages:
       [self.results.append(language) for language in languages]
     
     # ISSN links
-    issnLinks = ISSNMapper(self.record).mapData()
+    report("INFO: STK02 getting the ISSN")
+    issnLinks = ISSNMapper(self.record, self.resourceURI, self.representationURI).mapData()
     if issnLinks:
       [self.results.append(issnLink) for issnLink in issnLinks]
       
     # Online version of the journal
+    report("INFO: STK02 getting the online version URL")
     onlineVersion = self.record.getXPath('//varfield[@id="856"][@i1="4"]/subfield[@label="u"]')
     if not onlineVersion == []:
       onlineVersion = onlineVersion[0]
+      report("INFO: journal has online version at %s" % (onlineVersion))
       self.results.append((
         self.resourceURI,
         rdflibWrapper.namespaces["dcterms"]["hasVersion"],
@@ -265,6 +296,7 @@ class STK02Callback(Callback):
       # Validate onlineVersion URI? bibo:uri datatype property?
       
   def addStaticTriplesBase(self):
+    report("INFO: STK02 adding static triples")
     triples = [(
       self.resourceURI,
       rdflibWrapper.namespaces["rdf"]["type"], 
@@ -276,8 +308,7 @@ class STK02Callback(Callback):
 class STK10Callback(Callback):
   
   def __init__(self, baseName="STK10"):
-    Callback.__init__(self)
-    self.pshTranslateDict = {}
+    Callback.__init__(self, baseName)
   
   def insertSKOSRelations(self, terms, predicate):
     if not terms == []:
@@ -286,7 +317,7 @@ class STK10Callback(Callback):
           termTranslated = self.pshTranslateDict[term]
           self.results.append((
             self.resourceURI,
-            rdflibWrapper.namespaces["skos"][predicate]
+            rdflibWrapper.namespaces["skos"][predicate],
             rdflib.URIRef(termTranslated)
           ))
         except KeyError:
@@ -339,16 +370,7 @@ class STK10Callback(Callback):
           rdflibWrapper.namespaces["skos"]["altLabel"],
           rdflib.Literal(nonprefLabelEN, lang="en")
         ))
-        
-      # Pro následující je zapotřebí dodělat překlad prefLabel => ID (resp. URI), jako externí tabulku/CSV/SQLite bázi?
-      file = open("pshTranslateTable.csv", "r")
-      pshTranslateTable = file.read()
-      file.close()
-      pshTranslateTable = pshTranslateTable.split("\n")
-      for pshTranslateLine in pshTranslateTable:
-        line = pshTranslateLine.split(";")
-        self.pshTranslateDict[line[0]] = line[1]
-        
+              
       # Related terms
       relatedTerms = marcARecord.getRelatedTerms()
       self.insertSKOSRelations(relatedTerms, "related")
@@ -373,7 +395,7 @@ class STK10Callback(Callback):
 class STK01Callback(Callback):
   
   def __init__(self, baseName="STK01"):
-    Callback.__init__(self)
+    Callback.__init__(self, baseName)
     
   def main(self):
     self.getIdentifiers("bib")
@@ -483,7 +505,8 @@ class STK01Callback(Callback):
         ))
       except KeyError:
         # FMT string not found
-        
+        report("FMT string not found")
+      
     # Call number
     callNumber = self.record.getXPath('//varfield[@id="990"]/subfield[@label="g"]')
     if not callNumber == []:
@@ -500,19 +523,20 @@ class STK01Callback(Callback):
       editionStatement = editionStatement[0].strip()
       self.results.append((
         self.resourceURI,
-        rdflibWrapper.namespaces["dbpedia"]["numberEdition"]
+        rdflibWrapper.namespaces["bibo"]["number"],
         rdflib.Literal(editionStatement)
       ))
       
     # Note
-    note = self.record.getXPath('//varfield[@id="500"]/subfield[@label="a"]')
-    if not note == []:
-      note = note[0].strip()
-      self.results.append((
-        self.resourceURI,
-        rdflibWrapper.namespace["dc"]["description"],
-        rdflib.Literal(note, lang="cs")
-      ))
+    notes = self.record.getXPath('//varfield[@id="500"]/subfield[@label="a"] | //varfield[@id="502"]/subfield[@label="a"]')
+    if not notes == []:
+      for note in notes:
+        note = note.strip()
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespace["dc"]["description"],
+          rdflib.Literal(note, lang="cs")
+        ))
       
     # Added name entry
     addedNameEntries = self.record.getXPath('//varfield[@id="700"][@i1="1"]/subfield[@label="a"]')
@@ -579,7 +603,69 @@ class STK01Callback(Callback):
           rdflibWrapper.namespaces["bibo"]["edition"],
           rdflib.Literal(edition)
         ))
-        
+    
+    # Contributors
+    contributors = self.record.getXPath('//varfield[@id="245"]/subfield[@label="c"]')
+    if not contributors == []:
+     contributors = contributors[0].strip().strip("by").strip().rstrip(".").replace("  ", " ").split(", ") # Vain attempt to clean the data.
+     for contributor in contributors:
+       self.results.append((
+         self.resourceURI,
+         rdflibWrapper.namespaces["dc"]["contributor"],
+         rdflib.Literal(contributor)
+       ))
+      
+    # Alternate title
+    alternateTitle = self.record.getXPath('//varfield[@id="246"][@i1="3"][@i2="0"]/subfield[@label="a"]')
+    if not alternateTitle == []:
+      alternateTitle = alternateTitle[0].strip()
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespace["dbpedia"]["alternateTitle"],
+        rdflib.Literal(alternateTitle)
+      ))
+    
+    # PSH subject term
+    pshTerms = self.record.getXPath('//varfield[@id="650"][@i1="0"][@i2="7"]/subfield[@label="a"]')
+    if not pshTerms == []:
+      for pshTerm in pshTerms:
+        pshTerm = pshTerm.strip()
+        pshURI = self.pshTranslateTable[pshTerm]
+        self.results.append((
+          self.resourceURI,
+          rdflibWrapper.namespaces["dc"]["subject"],
+          rdflib.URIRef(pshURI)
+        ))
+    
+    # Sequence number in edition
+    editionNumber = self.record.getXPath('//varfield[@id="490"]/subfield[@label="v"]')
+    if not editionNumber == []:
+      editionNumber = editionNumber[0].strip()
+      self.results.append((
+        self.resourceURI,
+        rdflibWrapper.namespaces["dbpedia"]["numberEdition"],
+        rdflib.Literal(editionNumber)
+      ))
+    
+    # Added entry - corporation
+    corporationAddedEntry = self.record.getXPath('//varfield[@id="710"]/subfield[@label="a"]')
+    if not corporationAddedEntry == []:
+      corporationAddedEntry = corporationAddedEntry[0].strip()
+      bnodeID = rdflib.BNode()
+      self.addTriples([(
+        self.resourceURI,
+        rdflibWrapper.namespaces["dc"]["creator"],
+        bnodeID
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["rdf"]["value"],
+        rdflib.Literal(corporationAddedEntry)
+      ), (
+        bnodeID,
+        rdflibWrapper.namespaces["rdf"]["type"],
+        rdflibWrapper.namespaces["yago"]["Corporation"]
+      )]) 
+          
   def addStaticTriplesBase(self):
     triples = [(
       self.representationURI,

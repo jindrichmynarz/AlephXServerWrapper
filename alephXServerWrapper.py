@@ -2,7 +2,8 @@
 #-*- coding:utf-8 -*-
 
 import math, urllib, urllib2, libxml2, time, os, sys, sqlite3, logging
-from callbacks import *
+# from callbacks import *
+from report import report
 
 failed = []
 
@@ -112,20 +113,24 @@ class Crawler(object):
     baseRange = range(begin, baseLen + 1)
     try:
       for i in baseRange:
+        report("INFO: record no. %d" % (i))
         time.sleep(sleep) # Slušný crawler čeká sekundu mezi požadavky!
         self.status = str(i)
         callbackInstance.run(self.base.getParsedRecord(i))
     except KeyboardInterrupt:
-        callbackInstance.commit() # Saves the crawled triples.
-        self.saveStatus(i, True)        
+      report("ERROR: KeyboardInterrupt")
+      callbackInstance.commitData() # Saves the crawled triples.
+      self.saveStatus(i, True)        
     except:
-        if self.test != i:
-          callbackInstance.commit() # Saves the crawled triples.
-          self.saveStatus(i)
-        time.sleep(self.sleep)
-        self.sleep = self.sleep*5
-        self.test = i
-        self.crawl(callbackInstance)
+      report("ERROR: crawler returned error.")
+      raise SystemExit
+      if self.test != i:
+        callbackInstance.commitData() # Saves the crawled triples.
+        self.saveStatus(i)
+      time.sleep(self.sleep)
+      self.sleep = self.sleep*5
+      self.test = i
+      self.crawl(callbackInstance)
         
     
   def saveStatus(self, i, keyboardInterrupt = False):
@@ -147,8 +152,11 @@ class Record(object):
     
     results = self.doc.xpathEval(xpath)
     output = []
-    for result in results:
-      output.append(result.content)
+    if type(results) == type([]):
+      for result in results:
+        output.append(result.content)
+    else:
+      output.append(results)
     return output
     
   def getMarc(self, field, subfield):

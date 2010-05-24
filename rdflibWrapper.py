@@ -4,6 +4,7 @@
 import rdflib
 from rdflib.Graph import ConjunctiveGraph as Graph
 from rdflib.store import Store, VALID_STORE
+from report import report
 
 # Namespace initialization
 namespaces = {
@@ -21,10 +22,12 @@ namespaces = {
   "dbpedia" : rdflib.Namespace("http://dbpedia.org/property/"),
   "sioc" : rdflib.Namespace("http://rdfs.org/sioc/ns#"),
   "dcam" : rdflib.Namespace("http://purl.org/dc/dcam/"),
+  "marcrel" : rdflib.Namespace("http://www.loc.gov/loc.terms/relators/"), # Must be read from Google's cache, or from http://www.loc.gov/marc/relators/relacode.html
 }
-
+   
 def connect():
-  configString = "host=localhost,user=username,password=password,db=rdfstore" # Přesunout do config souboru, který bude přístupný na zadání hesla. Můžeme udělat až po ELAGu.
+  report("INFO: connecting RDFStore")
+  configString = "host=localhost,user=root,password=Takk2005,db=rdfstore" # Přesunout do config souboru, který bude přístupný na zadání hesla. Můžeme udělat až po ELAGu.
 
   store = rdflib.plugin.get("MySQL", Store)("rdfstore")
   rt = store.open(configString, create=False)
@@ -34,10 +37,23 @@ def connect():
   else:
     assert rt == VALID_STORE, "The store is valid"
   # Tato funkce by nejspíš měla vracet proměnnou "store" - connection na RDFLib DB
-    
-def commitData(triples):  
+  return store
+
+store = connect()
+
+def commitData(triples): 
+  """
+    Commits triples to RDF store
+  """
+  report("INFO: rdflibWrapper.commitData")
   default_graph_uri = "http://rdflib.net/rdfstore" # K čemu tohle slouží?
-  graph = Graph(store, identifier=rdflib.URIRef(default_graph_uri)) # Graph se bude vytvářet pokaždé?
+  
+  graph = Graph(store, identifier = rdflib.URIRef(default_graph_uri)) # Graph se bude vytvářet pokaždé?
   triples = list(set(triples)) # Deduplication of triples
+  report("INFO: adding %d triples" % (len(triples)))
+  for triple in triples:
+    report("S:%s, P:%s, O:%s" % (str(triple[0]), str(triple[1]), str(triple[2])))
+  
   map(lambda triple: graph.add(triple), triples) # Add triples to the graph
+
   graph.commit() # Commit newly added triples

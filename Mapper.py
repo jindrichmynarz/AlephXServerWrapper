@@ -2,8 +2,14 @@
 #-*- coding:utf-8 -*-
 
 import urllib, urllib2, libxml2, re, time, string, rdflib, unicodedata
-from alephXServerWrapper import *
+from alephXServerWrapper import Record
 import rdflibWrapper
+from report import report
+
+validLanguagesGlobal = {
+  "marccodes" : [],
+  "lexvo" : []
+}
 
 class Mapper():
   """Obecná třída pro mapování hodnot."""
@@ -13,6 +19,7 @@ class Mapper():
     self.doc = doc # Na vstupu bere celý XML záznam (class Record)
     self.resourceURI = resourceURI
     self.representationURI = representationURI
+    report("INFO: initializing Mapper with \n\trecord: %s\n\tresource URI: %s\n\trepresentation URI: %s" % (self.doc, self.resourceURI, self.representationURI))
     
   def mapData(self):
     """Vrací pole s tuples s predikáty a jejich objekty, subjektem je vždy zpracováváný dokument.
@@ -21,6 +28,7 @@ class Mapper():
    
   def getParsedDoc(self, url):
     """Na zadané URL nebo urllib2.Request vrátí naparsovaný XML dokument.""" 
+    report("INFO: Mapper.getParsedDoc on URL %s" % (url))
     result = urllib2.urlopen(url)
     doc = result.read()
     result.close()
@@ -29,8 +37,9 @@ class Mapper():
      
   def validateURI(self, uri):
     """Zjišťuje, zdali je zadané URI dostupné."""
+    report("INFO: validating URI %s" % (uri))
     try:
-      urllib2.urlopen(uri)
+      urllib2.urlopen(urllib2.Request(uri, None, {"Accept" : "application/rdf+xml"})) # Validation on marccodes.heroku.com doesn't work without the Accept HTTP header
       return True
     except urllib2.HTTPError:
       return False
@@ -38,12 +47,16 @@ class Mapper():
   def searchAlephBase(self, baseUrl, baseCode, findCode, request):
     """Searches the Aleph X Services (running on baseUrl) with specified database code for the request, within the find code and returns the result."""
     url = "%s/X?op=find&base=%s&code=%s&request=%s" % (baseUrl, baseCode, findCode, urllib.quote(request.strip()))
+    report("INFO: Mapper.searchAlephBase for URL %s" % (url))
     doc = self.getParsedDoc(url)
     error = doc.getXPath("find/error")
     if error == []:
-      noRecords = doc.xpathEval("find/no_records")[0]
-      setNumber = doc.xpathEval("find/set_number")[0]
-      url = "%sX?op=present&base=%s&set_entry=1-%s&set_number=%s" % (baseUrl, baseCode, noRecords.lstrip("0"), setNumber)
+      report("INFO: Mapper.searchAlephBase no errors")
+      noRecords = doc.getXPath("find/no_records")[0]
+      report("INFO: found %s records" % (noRecords))
+      setNumber = doc.getXPath("find/set_number")[0]
+      url = "%s/X?op=present&base=%s&set_entry=1-%s&set_number=%s" % (baseUrl, baseCode, noRecords.lstrip("0"), setNumber.lstrip("0"))
+      report("INFO: Mapper.searchAlephBase getting the search results on URL %s" % (url))
       doc = self.getParsedDoc(url)
       return doc
     else:
@@ -121,6 +134,7 @@ class LanguageMapper(Mapper):
     Mapper.__init__(self, doc, resourceURI, representationURI)
   
   def mapData(self):
+    report("INFO: LanguageMapper.mapData method")
     # Získání language codes
     languageCodes = []
     
@@ -145,16 +159,37 @@ class LanguageMapper(Mapper):
     if not extract == []:
       languageCodes.append(extract[0])
       
-    # Deduplikace language codes
-    languageCodes = list(set(languageCodes))
+    # Language codes parsing
+    temp = [] # Temporary array
+    for languageCode in languageCodes:
+      # pokud je jich v poli více jako třeba: eng, cze, rus
+      if len(languageCode) > 3:
+        for languageMatch in re.finditer(r"[a-z]{3}", languageCode):
+          temp.append(languageMatch.group(0))
+      else:
+        temp.append(languageCode)
+    languageCodes = temp # Revert
     
+    # Language codes deduplication
+    languageCodes = list(set(languageCodes))
+
     # Validace language codes
     validLanguageCodes = []
     for languageCode in languageCodes:
       # MARCCodes
+      write = False
       uri = "http://purl.org/NET/marccodes/languages/%s" % (languageCode)
-      valid = self.validateURI(uri)
-      if valid:
+
+      if uri in validLanguagesGlobal["marccodes"]:
+        write = True
+      else:  
+        valid = self.validateURI(uri)
+        if valid:
+          report("INFO: valid URI %s" % (uri))
+          validLanguagesGlobal["marccodes"].append(uri)
+          write = True
+
+      if write:
         validLanguageCodes.append((
           self.resourceURI,
           rdflibWrapper.namespaces["dc"]["language"],
@@ -162,9 +197,18 @@ class LanguageMapper(Mapper):
         ))
       
       # Lexvo
+      write = False
       uri = "http://www.lexvo.org/id/iso639-3/%s" % (languageCode)
-      valid = self.validateURI(uri)
-      if valid:
+      
+      if uri in validLanguagesGlobal["lexvo"]:
+        write = True
+      else:
+        valid = self.validateURI(uri)
+        if valid:
+          validLanguagesGlobal["lexvo"].append(uri)
+          write = True
+      
+      if write:
         validLanguageCodes.append((
           self.resourceURI,
           rdflibWrapper.namespaces["dc"]["language"],
@@ -292,15 +336,18 @@ class AuthorMapper(Mapper):
   def mapData(self, authorType):
     # authorType = {"main" | "added"}
     if authorType == "main":
-      xpath = "//varfield[@id='100']/subfield[@label='a']"
+      authorXpath = "//varfield[@id='100']/subfield[@label='a']"
+      relatorXpath = "//varfield[@id='100']/subfield[@label='4']"
       predicate = rdflibWrapper.namespaces["dc"]["creator"]
     elif author == "added":
-      xpath = "//varfield[@id='700']/subfield[@label='a']"
+      authorXpath = "//varfield[@id='700']/subfield[@label='a']"
+      relatorXpath = "//varfield[@id='700']/subfield[@label='4']"
       predicate = rdflibWrapper.namespaces["dc"]["contributor"]
     else:
       raise ValueError("AuthorMapper.mapData: not acceptable authorType argument.")
       
-    authors = self.doc.getXPath(xpath)
+    authors = self.doc.getXPath(authorXpath)
+    relatorCodes = self.doc.getXPath(relatorXpath) # TO IMPLEMENT!
     if not authors == []:
       for author in authors:
         author = author.strip().rstrip(",").strip()
@@ -595,10 +642,12 @@ class ISSNMapper(Mapper):
   """ISSN to system number translation. Returns the URI of the previous version."""
   
   def __init__(self, doc, resourceURI, representationURI):
+    report("INFO: initializing ISSNMapper")
     Mapper.__init__(self, doc, resourceURI, representationURI)
     self.results = []
     
   def mapData(self):
+    report("INFO: ISSNMapper.mapData")
     # ISSN předcházející verze
     result = self.mapISSN("//varfield[@id='780']/subfield[@label='x']", rdflibWrapper.namespaces["dbpedia"]["previous"])
       
@@ -636,19 +685,22 @@ class ISSNMapper(Mapper):
     # ISSN - je překladem
     result = self.mapISSN('varfield[@id="765"]/subfield[@label="x"]', rdflibWrapper.namespaces["bibo"]["translationOf"])
 
-    if not self.result == []:
+    if not self.results == []:
       return self.results
     else:
       return False
       
   def getISSNURI(self, ISSN):
+    report("INFO: ISSNMapper.getISSNURI")
     if not ISSN == []:
       ISSN = ISSN[0]
+      report("INFO: ISSNMapper.getISSNURI got ISSN %s" % (ISSN))
       doc = self.searchAlephBase("http://aleph.techlib.cz", "STK02", "SSN", ISSN.strip())
       if doc:
         sysno = doc.getXPath("present/record/doc_number")
         if not sysno == []:
-          sysno = re.search("\d+$", sysno[0].content).group(0).lstrip("0")
+          sysno = re.search("\d+$", sysno[0]).group(0).lstrip("0")
+          report("INFO: ISSNMapper.getISSNURI sysno is %s" % (sysno))
           uri = "http://data.techlib.cz/resource/issn/%s" % (sysno)
           return uri
         else:
@@ -659,9 +711,11 @@ class ISSNMapper(Mapper):
       return False
       
   def mapISSN(self, xpath, predicate):
+    report("INFO: ISSNMapper.mapISSN")
     ISSN = self.doc.getXPath(xpath)
     issnURI = self.getISSNURI(ISSN)
     if issnURI:
+      report("INFO: got ISSN URI %s" % (issnURI))
       self.results.append((
         self.resourceURI,
         predicate,
@@ -675,14 +729,17 @@ class LastModifiedDateMapper(Mapper):
   """Maps the last modified data from fixfield 005"""
   
   def __init__(self, doc, resourceURI, representationURI):
+    report("INFO: initializing LastModifiedDateMapper")
     Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
+    report("INFO: LastModifiedDateMapper.mapData")
     lastModified = self.doc.getXPath("//fixfield[@id='005']")
     if not lastModified == []:
       lastModified = lastModified[0]
       parseDate = re.search("^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})", lastModified)
       lastModified = "%s-%s-%s+%s:%s" % (parseDate.group(1), parseDate.group(2), parseDate.group(3), parseDate.group(4), parseDate.group(5))
+      report("INFO: last modified date %s" % (lastModified))
       return [(
         self.representationURI, 
         rdflibWrapper.namespaces["dcterms"]["modified"], 
@@ -696,12 +753,14 @@ class Fixfield008Mapper(Mapper):
   """Maps the values from the fixfield 008."""
   
   def __init__(self, doc, resourceURI, representationURI):
+    report("INFO: initializing Fixfield008Mapper instance")
     Mapper.__init__(self, doc, resourceURI, representationURI)
     self.results = []
     
   def mapData(self):
+    report("INFO: mapping Fixfield008Mapper data")
     eight_21 = []
-    eight_21.append(self.doc.getXPath("substring(//fixfield[@id='008'], 22, 1)"))
+    eight_21.append(self.doc.getXPath("substring(//fixfield[@id='008'], 22, 1)")[0])
     predicate = rdflibWrapper.namespaces["rdf"]["type"]
     eight_21_dict = {
       "d" : rdflibWrapper.namespaces["yago"]["Database"],
@@ -714,8 +773,8 @@ class Fixfield008Mapper(Mapper):
     self.mapExtractedValues(predicate, eight_21_dict, eight_21)
     
     eight_23 = []
-    eight_23.append(self.doc.getXPath("substring(//fixfield[@id='008'], 24, 1)"))
-    eight_23.append(self.doc.getXPath("substring(//fixfield[@id='008'], 25, 1)"))
+    eight_23.append(self.doc.getXPath("substring(//fixfield[@id='008'], 24, 1)")[0])
+    eight_23.append(self.doc.getXPath("substring(//fixfield[@id='008'], 25, 1)")[0])
     predicate = rdflibWrapper.namespaces["dc"]["format"]
     eight_23_dict = {
       "a" : rdflibWrapper.namespaces["yago"]["Microfilm"],
@@ -728,12 +787,15 @@ class Fixfield008Mapper(Mapper):
     } # rdf:type dcterms:physicalMedium .
     self.mapExtractedValues(predicate, eight_23_dict, eight_23)
     
+    report("INFO: Fixfield008Mapper.mapData appending results")
     if not self.results == []:
+      report("INFO: Fixfield008Mapper.mapData results %s" % (self.results))
       return self.results
     else:
       return False
     
   def mapExtractedValues(self, predicate, valueDict, extractedValues):
+    report("INFO: Fixfield008Mapper.mapExtractedValues")
     for extractedValue in extractedValues:
       try:
         self.results.append((
@@ -742,7 +804,7 @@ class Fixfield008Mapper(Mapper):
           valueDict[extractedValue]
         ))
       except KeyError:
-          pass
+        report("[ERROR] Fixfield008Mapper.mapExtractedValues KeyError for key %s" % (extractedValue))
           
           
 class Varfield245SubfieldBMapper(Mapper):
@@ -757,8 +819,17 @@ class Varfield245SubfieldBMapper(Mapper):
   def mapData(self):
     extractedValue = self.doc.getXPath('//varfield[@id="245"]/subfield[@label="b"]')
     if not extractedValue == []:
-      extractedValue = extractedValue[0]
-      pass # To implement!
+      subTitles = []
+      parallelTitles = []
+      extractedValue = extractedValue[0].strip().rstrip(".")
+      subfieldAEnding = self.doc.getXpath('//varfield[@id="245"]/subfield[@label="a"]')[0].strip()[-1]
+      subfieldAEndingDict = {
+        "=" : rdflibWrapper.namespaces["dc"]["title"],
+        ":" : rdflibWrapper.namespaces["dbpedia"]["subtitle"],
+      }
+      parallelTitles = extractedValue.split(" = ")
+      # To implement
+      # Capitalize first letter!
     else:
       return False
 
