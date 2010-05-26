@@ -5,12 +5,15 @@ import rdflib
 from rdflib.Graph import ConjunctiveGraph as Graph
 from rdflib.store import Store, VALID_STORE
 from report import report
+from ConfigParser import ConfigParser
+# from getpass import getpass
 
 # Namespace initialization
 namespaces = {
   "rdf" : rdflib.Namespace("http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
   "xsd" : rdflib.Namespace("http://www.w3.org/2001/XMLSchema#"),
   "owl" : rdflib.Namespace("http://www.w3.org/2002/07/owl#"),
+  "cc" : rdflib.Namespace("http://creativecommons.org/ns#"),
   "dc" : rdflib.Namespace("http://purl.org/dc/elements/1.1/"),
   "dcterms" : rdflib.Namespace("http://purl.org/dc/terms/"),
   "skos" : rdflib.Namespace("http://www.w3.org/2004/02/skos/core#"),
@@ -27,7 +30,10 @@ namespaces = {
    
 def connect():
   report("INFO: connecting RDFStore")
-  configString = "host=localhost,user=root,password=Takk2005,db=rdfstore" # Přesunout do config souboru, který bude přístupný na zadání hesla. Můžeme udělat až po ELAGu.
+  config = ConfigParser()
+  config.read("config.ini")
+  # password = getpass()
+  configString = "host=%s,user=%s,password=%s,db=%s" % (config.get("store", "host"), config.get("store", "user"), config.get("store", "password"), config.get("store", "db"))
 
   store = rdflib.plugin.get("MySQL", Store)("rdfstore")
   rt = store.open(configString, create=False)
@@ -46,9 +52,9 @@ def commitData(triples):
     Commits triples to RDF store
   """
   report("INFO: rdflibWrapper.commitData")
-  default_graph_uri = "http://rdflib.net/rdfstore" # K čemu tohle slouží?
+  # default_graph_uri = "http://rdflib.net/rdfstore"
   
-  graph = Graph(store, identifier = rdflib.URIRef(default_graph_uri)) # Graph se bude vytvářet pokaždé?
+  graph = Graph(store) # Other optional argument: identifier = rdflib.URIRef(default_graph_uri)
   triples = list(set(triples)) # Deduplication of triples
   report("INFO: adding %d triples" % (len(triples)))
   for triple in triples:

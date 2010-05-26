@@ -512,9 +512,14 @@ class GeonamesMapper(Mapper):
     Mapper.__init__(self, doc, resourceURI, representationURI)
     
   def mapData(self):
+    baseUrl = "http://sws.geonames.org/"
     # dc:coverage, 651, 662, 751, 752
     # extract = self.doc.getXPath()
-    pass
+    # For the place of publication as well
+    placeOfPublication = self.doc.getXPath('//varfield[@id="260"]/subfield[@label="a"]')
+    if not placeOfPublication == []:
+      placeOfPublication = placeOfPublication[0].strip(":").strip(";").strip()
+      url = "http://ws.geonames.org/search?name_equals=%s&maxRows=10&type=rdf" % (urllib.quote(placeOfPublication))
 
 
 class OpenLibraryMapper(Mapper):
@@ -567,11 +572,12 @@ class SiglaMapper(Mapper):
       else:
         doc = self.searchAlephBase("http://sigma.nkp.cz", "ADR", "SIG", sigla)
         if doc:
-          xpath = "present/record/doc_number[metadata/oai_marc/varfield[@id='SGL']/subfield[@label='a']/text()='%s']" % (sigla)
+          xpath = "present/record/doc_number"
           docNum = doc.getXPath(xpath)
           if not docNum == []:
             docNum = docNum[0].lstrip("0")
             siglaURI = "http://sigma.nkp.cz/X?op=doc-num&base=ADR&doc-num=" + docNum
+            siglaCache[sigla] = siglaURI
     if siglaURI:
       return [(
         self.representationURI,
@@ -579,7 +585,7 @@ class SiglaMapper(Mapper):
         rdflib.URIRef(siglaURI)
       )]
     else:
-      return False    
+      return False
     
 class PSHQualifierMapper(Mapper):
   

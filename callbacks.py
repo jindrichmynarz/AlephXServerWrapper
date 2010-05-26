@@ -169,7 +169,7 @@ class Callback():
         self.representationURI,
         rdflibWrapper.namespaces["dcterms"]["rightsHolder"],
         rdflib.URIRef("http://www.techlib.cz")
-      ),
+      )
     ]
     self.addTriples(triples)
     
@@ -183,8 +183,8 @@ class Callback():
     self.record = record
     report("INFO: callback main extraction")
     self.main()
-    # report("INFO: callback adding global static triples")
-    # self.addStaticTriplesGlobal()
+    report("INFO: callback adding global static triples")
+    self.addStaticTriplesGlobal()
     report("INFO: callback adding base static triples")
     self.addStaticTriplesBase()
     # report("INFO: callback writing unmapped")
@@ -328,7 +328,7 @@ class STK10Callback(Callback):
   
   def main(self):
     # Write URIs & identifiers
-    self.getIdentifiers("issn")
+    self.getIdentifiers("psh")
     
     # Last modified date
     self.getLastModifiedDate()   
