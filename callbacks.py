@@ -18,8 +18,7 @@ class Callback():
     self.representationURI = "" # URI for the representation
     self.pshTranslateDict = {} # Dict for translating PSH preferred labels to IDs
     
-    # PSH translate table
-    report("INFO: Initializing PSH translate table.")
+    # PSH translate table report("INFO: Initializing PSH translate table.")
     file = open("pshTranslateTable.csv", "r")
     pshTranslateTable = file.read()
     file.close()
@@ -44,18 +43,21 @@ class Callback():
   
   def getIdentifiers(self, uriBase):
     report("INFO: getting identifiers for %s" % (uriBase))
-    sysno = self.record.getXPath("//fixfield[@id='001']")[0]
-    report("INFO: got sysno %s" % (sysno))
-    subject = re.search("\d+$", sysno).group(0).lstrip("0")
-    subject = "http://data.techlib.cz/resource/%s/%s" % (uriBase, subject)
-    report("INFO: got subject URI %s" % (subject))
-    self.resourceURI = rdflib.URIRef(subject)
-    self.representationURI = rdflib.URIRef(subject + ".rdf")
-    self.results.append((
-      self.representationURI,
-      rdflibWrapper.namespaces["dc"]["identifier"],
-      rdflib.Literal(sysno)
-    ))
+    sysno = self.record.getXPath("//fixfield[@id='001']")
+    if not sysno == []:
+      sysno = sysno[0]
+      report("INFO: got sysno %s" % (sysno))
+      subject = re.search("\d+$", sysno).group(0).lstrip("0")
+      subject = "http://data.techlib.cz/resource/%s/%s" % (uriBase, subject)
+      report("INFO: got subject URI %s" % (subject))
+      self.resourceURI = rdflib.URIRef(subject)
+      self.representationURI = rdflib.URIRef(subject + ".rdf")
+      self.results.append((
+        self.representationURI,
+        rdflibWrapper.namespaces["dc"]["identifier"],
+        rdflib.Literal(sysno)
+      ))
+      self.hasID = True
   
   def getLastModifiedDate(self):
     """Extracts the date of last modification"""
@@ -183,10 +185,23 @@ class Callback():
     self.record = record
     report("INFO: callback main extraction")
     self.main()
-    report("INFO: callback adding global static triples")
-    self.addStaticTriplesGlobal()
-    report("INFO: callback adding base static triples")
-    self.addStaticTriplesBase()
+    if self.hasID:
+      report("INFO: callback adding global static triples")
+      self.addStaticTriplesGlobal()
+      report("INFO: callback adding base static triples")
+      self.addStaticTriplesBase()
+    
+    if not self.hasTopConcepts:
+      # Top concepts
+      topConcepts = ['http://data.techlib.cz/resource/psh/5450', 'http://data.techlib.cz/resource/psh/4231', 'http://data.techlib.cz/resource/psh/3768', 'http://data.techlib.cz/resource/psh/4439', 'http://data.techlib.cz/resource/psh/8808', 'http://data.techlib.cz/resource/psh/9194', 'http://data.techlib.cz/resource/psh/8613', 'http://data.techlib.cz/resource/psh/11453', 'http://data.techlib.cz/resource/psh/6914', 'http://data.techlib.cz/resource/psh/8126', 'http://data.techlib.cz/resource/psh/11322', 'http://data.techlib.cz/resource/psh/8308', 'http://data.techlib.cz/resource/psh/1038', 'http://data.techlib.cz/resource/psh/7979', 'http://data.techlib.cz/resource/psh/5176', 'http://data.techlib.cz/resource/psh/5042', 'http://data.techlib.cz/resource/psh/12008', 'http://data.techlib.cz/resource/psh/7093', 'http://data.techlib.cz/resource/psh/11591', 'http://data.techlib.cz/resource/psh/116', 'http://data.techlib.cz/resource/psh/1781', 'http://data.techlib.cz/resource/psh/2395', 'http://data.techlib.cz/resource/psh/11939', 'http://data.techlib.cz/resource/psh/12577', 'http://data.techlib.cz/resource/psh/13220', 'http://data.techlib.cz/resource/psh/1', 'http://data.techlib.cz/resource/psh/320', 'http://data.techlib.cz/resource/psh/12314', 'http://data.techlib.cz/resource/psh/12156', 'http://data.techlib.cz/resource/psh/6445', 'http://data.techlib.cz/resource/psh/2086', 'http://data.techlib.cz/resource/psh/1217', 'http://data.techlib.cz/resource/psh/6548', 'http://data.techlib.cz/resource/psh/7769', 'http://data.techlib.cz/resource/psh/2910', 'http://data.techlib.cz/resource/psh/573', 'http://data.techlib.cz/resource/psh/2596', 'http://data.techlib.cz/resource/psh/6641', 'http://data.techlib.cz/resource/psh/10652', 'http://data.techlib.cz/resource/psh/10067', 'http://data.techlib.cz/resource/psh/9899', 'http://data.techlib.cz/resource/psh/10355', 'http://data.techlib.cz/resource/psh/9759', 'http://data.techlib.cz/resource/psh/9508']
+      for topConcept in topConcepts:
+        self.results.append((
+          rdflib.URIRef("http://data.techlib.cz/resource/psh/"),
+          rdflibWrapper.namespaces["skos"]["hasTopConcept"],
+          rdflib.URIRef(topConcept)
+        ))
+      self.hasTopConcepts = True
+      
     # report("INFO: callback writing unmapped")
     # self.writeUnmapped()
     if len(self.results) > 1000:
@@ -328,8 +343,10 @@ class STK10Callback(Callback):
   
   def main(self):
     # Write URIs & identifiers
-    self.getIdentifiers("psh")
-    
+    self.hasID = self.getIdentifiers("psh")
+    if not self.hasID:
+      return False
+          
     # Last modified date
     self.getLastModifiedDate()   
       
@@ -393,7 +410,6 @@ class STK10Callback(Callback):
       rdflibWrapper.namespaces["skos"]["Concept"]
     )]
     self.addTriples(triples)
-
 
 class STK01Callback(Callback):
   

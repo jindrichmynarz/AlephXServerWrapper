@@ -6,11 +6,16 @@ from alephXServerWrapper import Record
 import rdflibWrapper
 from report import report
 
-validLanguagesGlobal = {
-  "marccodes" : [],
-  "lexvo" : []
-}
-siglaCache = {}
+class Cache(object):
+
+  def __init__(self):
+    self.validLanguagesGlobal = {
+      "marccodes" : [],
+      "lexvo" : []
+    }
+    self.siglaCache = {}
+    
+cache = Cache()
 
 class Mapper():
   """Obecná třída pro mapování hodnot."""
@@ -181,13 +186,13 @@ class LanguageMapper(Mapper):
       write = False
       uri = "http://purl.org/NET/marccodes/languages/%s" % (languageCode)
 
-      if uri in validLanguagesGlobal["marccodes"]:
+      if uri in cache.validLanguagesGlobal["marccodes"]:
         write = True
       else:  
         valid = self.validateURI(uri)
         if valid:
           report("INFO: valid URI %s" % (uri))
-          validLanguagesGlobal["marccodes"].append(uri)
+          cache.validLanguagesGlobal["marccodes"].append(uri)
           write = True
 
       if write:
@@ -201,12 +206,12 @@ class LanguageMapper(Mapper):
       write = False
       uri = "http://www.lexvo.org/id/iso639-3/%s" % (languageCode)
       
-      if uri in validLanguagesGlobal["lexvo"]:
+      if uri in cache.validLanguagesGlobal["lexvo"]:
         write = True
       else:
         valid = self.validateURI(uri)
         if valid:
-          validLanguagesGlobal["lexvo"].append(uri)
+          cache.validLanguagesGlobal["lexvo"].append(uri)
           write = True
       
       if write:
@@ -337,19 +342,24 @@ class AuthorMapper(Mapper):
     
   def mapData(self, authorType):
     # authorType = {"main" | "added"}
+    results = []
     if authorType == "main":
       authorXpath = "//varfield[@id='100']/subfield[@label='a']"
       relatorXpath = "//varfield[@id='100']/subfield[@label='4']"
-      predicate = rdflibWrapper.namespaces["dc"]["creator"]
+      predicates = [rdflibWrapper.namespaces["dc"]["creator"]]
     elif authorType == "added":
       authorXpath = "//varfield[@id='700']/subfield[@label='a']"
       relatorXpath = "//varfield[@id='700']/subfield[@label='4']"
-      predicate = rdflibWrapper.namespaces["dc"]["contributor"]
+      predicates = [rdflibWrapper.namespaces["dc"]["contributor"]]
     else:
       raise ValueError("AuthorMapper.mapData: not acceptable authorType argument.")
-      
+
+    relatorCodes = self.doc.getXPath(relatorXpath)
+    if not relatorCodes:
+      for relatorCode in relatorCodes:
+        predicates.append(rdflibWrapper.namespaces["marcrel"][relatorCode])
+    
     authors = self.doc.getXPath(authorXpath)
-    relatorCodes = self.doc.getXPath(relatorXpath) # TO IMPLEMENT!
     if not authors == []:
       for author in authors:
         author = author.strip().rstrip(",").strip()
@@ -567,8 +577,8 @@ class SiglaMapper(Mapper):
     if not sigla == []:
       sigla = sigla[0]
       # Check whether the sigla is already cached.
-      if sigla in siglaCache.keys():
-        siglaURI = siglaCache[sigla]
+      if sigla in cache.siglaCache.keys():
+        siglaURI = cache.siglaCache[sigla]
       else:
         doc = self.searchAlephBase("http://sigma.nkp.cz", "ADR", "SIG", sigla)
         if doc:
@@ -577,7 +587,7 @@ class SiglaMapper(Mapper):
           if not docNum == []:
             docNum = docNum[0].lstrip("0")
             siglaURI = "http://sigma.nkp.cz/X?op=doc-num&base=ADR&doc-num=" + docNum
-            siglaCache[sigla] = siglaURI
+            cache.siglaCache[sigla] = siglaURI
     if siglaURI:
       return [(
         self.representationURI,
@@ -586,67 +596,6 @@ class SiglaMapper(Mapper):
       )]
     else:
       return False
-    
-class PSHQualifierMapper(Mapper):
-  
-  def __init__(self, doc, resourceURI, representationURI):
-    Mapper.__init__(self, doc, resourceURI, representationURI)
-    
-  def MapData(self):
-    # použít dict pro překlad PSH kvalifikátorů na URI konceptů, které zastupují
-    # Bude zapotřebí linkovat na PSH sklizené v rámci data.techlib.cz
-    qdict = {
-      'el': 'http://data.techlib.cz/resource/psh/1781',
-      'ch': 'http://data.techlib.cz/resource/psh/5450',
-      've': 'http://data.techlib.cz/resource/psh/11939',
-      'zd': 'http://data.techlib.cz/resource/psh/12577',
-      'ze': 'http://data.techlib.cz/resource/psh/13220',
-      'vo': 'http://data.techlib.cz/resource/psh/12008',
-      'gf': 'http://data.techlib.cz/resource/psh/3768',
-      'as': 'http://data.techlib.cz/resource/psh/320',
-      'en': 'http://data.techlib.cz/resource/psh/2395',
-      'vt': 'http://data.techlib.cz/resource/psh/12314',
-      'vv': 'http://data.techlib.cz/resource/psh/12156',
-      'in': 'http://data.techlib.cz/resource/psh/6445',
-      'et': 'http://data.techlib.cz/resource/psh/2086',
-      'gl': 'http://data.techlib.cz/resource/psh/4439',
-      'if': 'http://data.techlib.cz/resource/psh/6548',
-      'pr': 'http://data.techlib.cz/resource/psh/8808',
-      'ps': 'http://data.techlib.cz/resource/psh/9194',
-      'pp': 'http://data.techlib.cz/resource/psh/8613',
-      'ev': 'http://data.techlib.cz/resource/psh/1217',
-      'na': 'http://data.techlib.cz/resource/psh/7769',
-      'ts': 'http://data.techlib.cz/resource/psh/11453',
-      'li': 'http://data.techlib.cz/resource/psh/6914',
-      'pe': 'http://data.techlib.cz/resource/psh/8126',
-      'te': 'http://data.techlib.cz/resource/psh/11322',
-      'pl': 'http://data.techlib.cz/resource/psh/8308',
-      'do': 'http://data.techlib.cz/resource/psh/1038', 
-      'ob': 'http://data.techlib.cz/resource/psh/7979',
-      'fy': 'http://data.techlib.cz/resource/psh/2910',
-      'bi': 'http://data.techlib.cz/resource/psh/573',
-      'hu': 'http://data.techlib.cz/resource/psh/5176',
-      'hi': 'http://data.techlib.cz/resource/psh/5042',
-      'fi': 'http://data.techlib.cz/resource/psh/2596',
-      'an': 'http://data.techlib.cz/resource/psh/1',
-      'gr': 'http://data.techlib.cz/resource/psh/4231',
-      'ja': 'http://data.techlib.cz/resource/psh/6641',
-      'ma': 'http://data.techlib.cz/resource/psh/7093',
-      'sr': 'http://data.techlib.cz/resource/psh/10652',
-      'sp': 'http://data.techlib.cz/resource/psh/10067',
-      'sv': 'http://data.techlib.cz/resource/psh/9899',
-      'st': 'http://data.techlib.cz/resource/psh/10355',
-      'um': 'http://data.techlib.cz/resource/psh/11591',
-      'sj': 'http://data.techlib.cz/resource/psh/9759',
-      'so': 'http://data.techlib.cz/resource/psh/9508',
-      'au': 'http://data.techlib.cz/resource/psh/116'
-    }
-    qualifier = self.doc.getXPath("//varfield[@id='150']/subfield[@label='x']")[0]
-    return [(
-      self.resourceURI,
-      rdflibWrapper.namespaces["skos"]["broaderTransitive"],
-      rdflib.URIRef(qdict[qualifier])
-    )] # Co bude predikátem?
     
 
 class ISSNMapper(Mapper):

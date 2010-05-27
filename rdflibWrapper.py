@@ -25,7 +25,7 @@ namespaces = {
   "dbpedia" : rdflib.Namespace("http://dbpedia.org/property/"),
   "sioc" : rdflib.Namespace("http://rdfs.org/sioc/ns#"),
   "dcam" : rdflib.Namespace("http://purl.org/dc/dcam/"),
-  "marcrel" : rdflib.Namespace("http://www.loc.gov/loc.terms/relators/"), # Must be read from Google's cache, or from http://www.loc.gov/marc/relators/relacode.html
+  "marcrel" : rdflib.Namespace("http://id.loc.gov/vocabulary/relators/"), # Must be read from Google's cache, or from http://www.loc.gov/marc/relators/relacode.html
 }
    
 def connect():
